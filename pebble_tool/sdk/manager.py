@@ -274,8 +274,7 @@ subprocess.call([sys.executable, {}] + sys.argv[1:])
         else:
             raise SDKInstallError("Couldn't figure out what requirements to install.")
         subprocess.check_call([os.path.join(env_path, "bin", "python"), "-m", "pip", "install", "-r",
-                               os.path.join(path, "requirements-{}.txt".format(platform))],
-                              env={'PYTHONHOME': env_path, 'PATH': os.environ['PATH']})
+                               os.path.join(path, "requirements-{}.txt".format(platform))])
         if os.path.exists(os.path.join(dest_path, '..', 'node_modules')):
             print("Installing JS dependencies... (this may take a while)")
             invoke_npm(["install", "--silent"], cwd=os.path.join(dest_path, '..'))
