@@ -268,7 +268,7 @@ subprocess.call([sys.executable, {}] + sys.argv[1:])
         print("Installing dependencies...")
         print("This may fail installing Pillow==2.0.0. In that case, question why we still force 2.0.0 anyway.")
         subprocess.check_call([os.path.join(env_path, "bin", "python"), "-m", "pip", "install", "-r",
-                               os.path.join(path, "requirements.txt")])
+                               os.path.join(path, "requirements.txt")], cwd=path)
         # if sys.platform.startswith('darwin'):
         #     platform = 'osx'
         #     subprocess.check_call([os.path.join(env_path, "bin", "python"), "-m", "pip", "install", "-r",
