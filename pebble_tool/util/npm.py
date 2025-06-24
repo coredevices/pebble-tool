@@ -10,7 +10,7 @@ from pebble_tool.util.versions import version_to_key
 
 def check_npm():
     try:
-        npm_version = subprocess.check_output(["npm", "--version"]).strip()
+        npm_version = subprocess.check_output(["npm", "--version"], text=True).strip()
         if version_to_key(npm_version)[0] < 3:
             raise ToolError("We require npm3; you are using version {}.".format(npm_version))
     except OSError:
