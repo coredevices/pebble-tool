@@ -1,4 +1,4 @@
-from __future__ import absolute_import, print_function
+
 __author__ = 'katharine'
 
 from contextlib import closing
@@ -165,8 +165,8 @@ https://developer.rebble.io/developer.getpebble.com/legal/sdk-license/index.html
         result = False
         while True:
             try:
-                result = strtobool(input("Do you accept the Pebble Terms of Use and the "
-                                             "Pebble Developer License? (y/n) "))
+                result = strtobool(eval(input("Do you accept the Pebble Terms of Use and the "
+                                             "Pebble Developer License? (y/n) ")))
             except ValueError:
                 pass
             else:
@@ -300,4 +300,4 @@ subprocess.call([sys.executable, {}] + sys.argv[1:])
 
     @staticmethod
     def parse_version(version_string):
-        return tuple(map(int, version_string.split('-', 1)[0].split('.', 2)) + [0, 0])[:3]
+        return tuple(list(map(int, version_string.split('-', 1)[0].split('.', 2))) + [0, 0])[:3]

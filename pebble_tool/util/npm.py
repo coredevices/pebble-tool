@@ -1,5 +1,5 @@
 # encoding: utf-8
-from __future__ import absolute_import, print_function, division
+
 
 import os
 import subprocess
@@ -14,7 +14,7 @@ def check_npm():
         if version_to_key(npm_version)[0] < 3:
             raise ToolError("We require npm3; you are using version {}.".format(npm_version))
     except OSError:
-        raise ToolError(u"You must have npm ≥ 3.0.0 available on your path.")
+        raise ToolError("You must have npm ≥ 3.0.0 available on your path.")
     except subprocess.CalledProcessError:
         raise ToolError("Your npm installation appears to be broken.")
 

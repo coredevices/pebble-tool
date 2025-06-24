@@ -1,4 +1,4 @@
-from __future__ import absolute_import, print_function
+
 __author__ = 'katharine'
 
 from datetime import datetime
@@ -81,9 +81,9 @@ class PebbleLogPrinter(object):
             column = int(d['column']) if d['column'] is not None else 0
             try:
                 token = self.sourcemap.lookup(line - 1, column)  # sourcemap wants zero-based lines numbers!
-                return u"{}:{}:{}".format(token.src, token.src_line + 1, token.src_col)
+                return "{}:{}:{}".format(token.src, token.src_line + 1, token.src_col)
             except IndexError:
-                return u"???:?:?"
+                return "???:?:?"
 
         try:
             return re.sub(r"(:?file://[\w\/\.-]+)?pebble-js-app\.js((:?\:)(?P<line>\d+))((:?\:)(?P<column>\d+))?",
@@ -130,14 +130,14 @@ class PebbleLogPrinter(object):
 
         # We do actually know the original timestamp of the log (it's in packet.timestamp), but if we
         # use it that it meshes oddly with the JS logs, which must use the user's system time.
-        self._print(packet, u"[{}] {}:{}> {}".format(datetime.now().strftime("%H:%M:%S"), packet.filename,
+        self._print(packet, "[{}] {}:{}> {}".format(datetime.now().strftime("%H:%M:%S"), packet.filename,
                                                     packet.line_number, packet.message))
         self._maybe_handle_crash(packet)
 
     def handle_phone_log(self, packet):
         assert isinstance(packet, WebSocketPhoneAppLog)
         logstr = self._sourcemap_translate_js_log(packet.payload)
-        self._print(packet, u"[{}] pkjs> {}".format(datetime.now().strftime("%H:%M:%S"), logstr))
+        self._print(packet, "[{}] pkjs> {}".format(datetime.now().strftime("%H:%M:%S"), logstr))
 
     def handle_connection(self, packet):
         assert isinstance(packet, WebSocketConnectionStatusUpdate)

@@ -1,4 +1,4 @@
-from __future__ import absolute_import
+
 
 from six.moves import BaseHTTPServer
 import logging
@@ -109,13 +109,13 @@ class BrowserController(object):
         try:
             url = "http://{}:{}".format(self._get_ip(), server.server_port)
             url_code = pyqrcode.create(url)
-            print(url_code.terminal(quiet_zone=1))
+            print((url_code.terminal(quiet_zone=1)))
             print("===================================================================================================")
-            print("Please scan the QR code or enter the following URL in your mobile browser:\n{}".format(url))
+            print(("Please scan the QR code or enter the following URL in your mobile browser:\n{}".format(url)))
             print("===================================================================================================")
         except socket.error:
-            print("Unable to determine local IP address. Please browse to port {} on this machine from your mobile "
-                  "browser.".format(server.server_port))
+            print(("Unable to determine local IP address. Please browse to port {} on this machine from your mobile "
+                  "browser.".format(server.server_port)))
 
         print("\nUse Ctrl-C to stop sending sensor data to the emulator.\n")
         try:

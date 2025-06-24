@@ -1,4 +1,4 @@
-from __future__ import absolute_import, print_function
+
 
 import os
 import os.path
@@ -32,13 +32,13 @@ class DataLoggingCommand(PebbleCommand):
         if args.command == 'list':
             listing = data_logging_service.list()
             if len(listing) > 0:
-                for key in listing[0].keys():
+                for key in list(listing[0].keys()):
                     print("{:<20} ".format(key), end="")
                 print()
                 print("-" * 20 * len(listing[0]))
 
                 for item in listing:
-                    for value in item.values():
+                    for value in list(item.values()):
                         print("{:<20} ".format(value), end="")
                     print()
             else:

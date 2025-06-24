@@ -256,7 +256,7 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
     @classmethod
     def get_running_emulators(cls):
         running = []
-        for platform, sdks in get_all_emulator_info().items():
+        for platform, sdks in list(get_all_emulator_info().items()):
             for sdk in sdks:
                 if ManagedEmulatorTransport.is_emulator_alive(platform, sdk):
                     running.append((platform, sdk))

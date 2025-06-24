@@ -86,6 +86,6 @@ class TranscriptionServer(PebbleCommand):
         group = parser.add_mutually_exclusive_group(required=True)
         group.add_argument('transcription', nargs='?', type=str,
                             help="Transcribed message to send in the dictation result")
-        group.add_argument('--error', type=str, nargs='?', choices=mapping.keys(),
+        group.add_argument('--error', type=str, nargs='?', choices=list(mapping.keys()),
                             help='Error code to respond with, if simulating a failure.')
         return parser

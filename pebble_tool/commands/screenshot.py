@@ -1,4 +1,4 @@
-from __future__ import absolute_import, print_function
+
 __author__ = 'katharine'
 
 from six.moves import range
@@ -141,7 +141,7 @@ class ScreenshotCommand(PebbleCommand):
         roundness.extend(reversed(roundness))
         if should_roundify:
             for row, skip in zip(rgba, roundness):
-                for x in xrange(3, len(row), 4):
+                for x in range(3, len(row), 4):
                     if not skip <= x // 4 < len(row) // 4 - skip:
                         row[x] = 0
         return rgba

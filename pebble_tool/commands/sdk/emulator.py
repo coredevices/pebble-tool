@@ -1,4 +1,4 @@
-from __future__ import absolute_import
+
 __author__ = 'katharine'
 
 import errno
@@ -23,8 +23,8 @@ class KillCommand(BaseCommand):
             s = signal.SIGTERM
 
         info = emulator.get_all_emulator_info()
-        for platform in info.values():
-            for version in platform.values():
+        for platform in list(info.values()):
+            for version in list(platform.values()):
                 self._kill_if_running(version['qemu']['pid'], s)
                 self._kill_if_running(version['pypkjs']['pid'], s)
 

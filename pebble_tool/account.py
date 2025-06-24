@@ -1,4 +1,4 @@
-from __future__ import absolute_import
+
 
 import httplib2
 import json
