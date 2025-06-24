@@ -267,14 +267,16 @@ subprocess.call([sys.executable, {}] + sys.argv[1:])
         subprocess.check_call([sys.executable, "-m", "virtualenv", env_path])
         print("Installing dependencies...")
         print("This may fail installing Pillow==2.0.0. In that case, question why we still force 2.0.0 anyway.")
-        if sys.platform.startswith('darwin'):
-            platform = 'osx'
-            subprocess.check_call([os.path.join(env_path, "bin", "python"), "-m", "pip", "install", "-r",
-                                   os.path.join(path, "requirements-{}.txt".format(platform))])
-        elif sys.platform.startswith('linux'):
-            print("Linux requirements-linux.txt not implemented, skipping installation.")
-        else:
-            raise SDKInstallError("Couldn't figure out what requirements to install.")
+        subprocess.check_call([os.path.join(env_path, "bin", "python"), "-m", "pip", "install", "-r",
+                               os.path.join(path, "requirements.txt")])
+        # if sys.platform.startswith('darwin'):
+        #     platform = 'osx'
+        #     subprocess.check_call([os.path.join(env_path, "bin", "python"), "-m", "pip", "install", "-r",
+        #                            os.path.join(path, "requirements-{}.txt".format(platform))])
+        # elif sys.platform.startswith('linux'):
+        #     print("Linux requirements-linux.txt not implemented, skipping installation.")
+        # else:
+        #     raise SDKInstallError("Couldn't figure out what requirements to install.")
         if os.path.exists(os.path.join(dest_path, '..', 'node_modules')):
             print("Installing JS dependencies... (this may take a while)")
             invoke_npm(["install", "--silent"], cwd=os.path.join(dest_path, '..'))
