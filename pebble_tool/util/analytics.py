@@ -74,7 +74,7 @@ class PebbleAnalytics(threading.Thread):
         items = []
         for k, v in iteritems(d):
             new_key = parent_key + '_0_' + k if parent_key else k
-            if isinstance(v, collections.MutableMapping):
+            if isinstance(v, collections.abc.MutableMapping):
                 items.extend(iteritems(cls._flatten(v, new_key)))
             else:
                 items.append((new_key, v))
