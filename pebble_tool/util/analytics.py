@@ -5,7 +5,6 @@ from six import iteritems
 from six.moves import input
 
 import collections
-from distutils.util import strtobool
 import json
 import logging
 import os.path
