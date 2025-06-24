@@ -16,3 +16,4 @@ websocket-client==0.32.0
 wheel==0.24.0
 colorama==0.3.3
 packaging>=16.7
+virtualenv==20.31.2
