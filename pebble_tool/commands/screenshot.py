@@ -1,8 +1,6 @@
 
 __author__ = 'katharine'
 
-from six.moves import range
-
 import datetime
 import itertools
 import png

@@ -1,7 +1,6 @@
 
 __author__ = 'katharine'
 
-from six.moves import range
 from six import iteritems
 
 import bz2

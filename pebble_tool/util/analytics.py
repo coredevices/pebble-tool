@@ -2,7 +2,6 @@
 __author__ = 'katharine'
 
 from six import iteritems
-from six.moves import input
 
 import collections
 import json

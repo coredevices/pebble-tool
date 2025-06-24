@@ -8,7 +8,6 @@ import os
 from progressbar import ProgressBar, Percentage, Bar, FileTransferSpeed, Timer
 import requests
 import shutil
-from six.moves import input
 import subprocess
 import sys
 import tempfile
