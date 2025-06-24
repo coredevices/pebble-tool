@@ -32,7 +32,6 @@ class SDKProjectCommand(SDKCommand):
         command = [os.path.join(virtualenv, 'bin', 'python'), self.waf_path, command] + args
         logger.debug("waf command: %s", subprocess.list2cmdline(command))
         env = os.environ.copy()
-        env['PYTHONHOME'] = virtualenv
         env['NODE_PATH'] = node_modules
         env['NOCLIMB'] = "1"  # This prevents waf from climbing into parent directories and executing commands
         if extra_env is not None:
