@@ -177,8 +177,8 @@ https://developer.rebble.io/developer.getpebble.com/legal/sdk-license/index.html
         result = False
         while True:
             try:
-                result = strtobool(eval(input("Do you accept the Pebble Terms of Use and the "
-                                             "Pebble Developer License? (y/n) ")))
+                result = strtobool(input("Do you accept the Pebble Terms of Use and the "
+                                             "Pebble Developer License? (y/n) "))
             except ValueError:
                 pass
             else:
