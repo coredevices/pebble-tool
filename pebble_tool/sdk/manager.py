@@ -129,8 +129,7 @@ class SDKManager(object):
             subprocess.check_call([sys.executable, "-m", "virtualenv", virtualenv_path])
             print("Installing dependencies...")
             subprocess.check_call([os.path.join(virtualenv_path, "bin", "python"), "-m", "pip", "install", "-r",
-                                   os.path.join(path, "sdk-core", "requirements.txt")],
-                                  env={'PYTHONHOME': virtualenv_path})
+                                   os.path.join(path, "sdk-core", "requirements.txt")])
             package_json = os.path.join(path, "sdk-core", "package.json")
             if os.path.exists(package_json):
                 print("Installing JS dependencies... (this may take a while)")
