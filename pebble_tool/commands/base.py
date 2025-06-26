@@ -291,7 +291,7 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
             tz_offset = -time.altzone if time.localtime(ts).tm_isdst and time.daylight else -time.timezone
             tz_offset_minutes = tz_offset // 60
             tz_name = "UTC%+d" % (tz_offset_minutes / 60)
-            connection.send_packet(TimeMessage(message=SetUTC(unix_time=ts, utc_offset=tz_offset_minutes, tz_name=tz_name)))
+            connection.send_packet(TimeMessage(message=SetUTC(unix_time=int(ts), utc_offset=tz_offset_minutes, tz_name=tz_name)))
 
     @classmethod
     def add_argument_handler(cls, parser):
