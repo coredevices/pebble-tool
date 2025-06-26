@@ -238,7 +238,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
 
     def _wait_for_qemu(self):
         logger.info("Waiting for the firmware to boot.")
-        for i in range(20):
+        for i in range(60):
             time.sleep(0.2)
             try:
                 s = socket.create_connection(('localhost', self.qemu_serial_port))
