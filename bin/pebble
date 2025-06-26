@@ -26,6 +26,6 @@ if [ ! -e "$PYTHONHOME" ]; then
 	exit 1
 fi
 
-export PHONESIM_PATH="$PYTHONHOME/bin/pypkjs"
+export PHONESIM_PATH="$PEBBLE_PATH/.env/bin/pypkjs"
 
 "$PEBBLE_PATH/.env/bin/python" "$PEBBLE_PATH/pebble.py" "$@"
