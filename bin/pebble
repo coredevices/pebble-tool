@@ -7,11 +7,10 @@ realpath() {
 SCRIPT=`realpath $0`
 BIN_PATH=`dirname $SCRIPT`
 PEBBLE_PATH=`realpath $BIN_PATH/../`
-echo $PEBBLE_PATH
 
 export PEBBLE_TOOLCHAIN_PATH="$PEBBLE_PATH/arm-cs-tools/bin"
 export PATH="$BIN_PATH:$PATH"
-if [ ! -e "$PYTHONHOME" ]; then
+if [ ! -f "$PEBBLE_PATH/.env/bin/activate" ]; then
 	echo 'You must set up a virtualenv before you can use the pebble tool.'
 	echo "Try these commands from $PEBBLE_PATH:"
 	echo
