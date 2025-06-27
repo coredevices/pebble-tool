@@ -10,17 +10,15 @@ PEBBLE_PATH=`realpath $BIN_PATH/../`
 
 export PEBBLE_TOOLCHAIN_PATH="$PEBBLE_PATH/arm-cs-tools/bin"
 export PATH="$BIN_PATH:$PATH"
-if [ ! -f "$PEBBLE_PATH/.env/bin/activate" ]; then
-	echo 'You must set up a virtualenv before you can use the pebble tool.'
+if [ ! -f "$PEBBLE_PATH/.venv/bin/activate" ]; then
+	echo 'You must set up a venv before you can use the pebble tool.'
 	echo "Try these commands from $PEBBLE_PATH:"
 	echo
-	echo 'virtualenv --no-site-packages .env'
-	echo 'source .env/bin/activate'
+	echo 'python -m venv .venv'
+	echo 'source .venv/bin/activate'
 	echo 'pip install -r requirements.txt'
 	echo 'deactivate'
 	echo
-	echo "If you don't have 'virtualenv', try \`sudo pip install virtualenv\`.'"
-	echo "If you don't have 'pip', try \`sudo easy_install pip\`."
 	echo "If you still need help, contact devsupport@getpebble.com."
 	exit 1
 fi

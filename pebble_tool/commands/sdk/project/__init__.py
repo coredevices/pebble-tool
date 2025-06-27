@@ -28,12 +28,12 @@ class SDKProjectCommand(SDKCommand):
         if self._verbosity > 0:
             v = '-' + ('v' * self._verbosity)
             args = [v] + args
-        virtualenv = os.path.join(self.get_sdk_path(), '..', '.env')
+        venv = os.path.join(self.get_sdk_path(), '..', '.venv')
         node_modules = os.path.join(self.get_sdk_path(), '..', 'node_modules')
-        command = [os.path.join(virtualenv, 'bin', 'python'), self.waf_path, command] + args
+        command = [os.path.join(venv, 'bin', 'python'), self.waf_path, command] + args
         logger.debug("waf command: %s", subprocess.list2cmdline(command))
         env = os.environ.copy()
-        env['PYTHONHOME'] = os.path.abspath(virtualenv)
+        env['PYTHONHOME'] = os.path.abspath(venv)
         env['PYTHONPATH'] = ':'.join(sys.path)
         env['NODE_PATH'] = node_modules
         env['NOCLIMB'] = "1"  # This prevents waf from climbing into parent directories and executing commands
