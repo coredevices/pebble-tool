@@ -39,7 +39,9 @@ class Account(object):
 
     @property
     def is_logged_in(self):
-        return True if self.storage.get() else False
+        if os.path.isfile(os.path.join(self.persistent_dir, 'oauth_storage')) and self.storage.get():
+            return True
+        return False
 
     def get_credentials(self):
         return self.storage.get()
