@@ -34,9 +34,9 @@ with open('pebble_tool/version.py') as f:
 setup(name='pebble-tool',
       version=__version__,
       description='Tool for interacting with pebbles.',
-      url='https://github.com/pebble/pebble-tool',
-      author='Pebble Technology Corporation',
-      author_email='katharine@pebble.com',
+      url='https://github.com/coredevices/pebble-tool',
+      author='Core Devices LLC',
+      author_email='griffin@griffinli.com',
       license='MIT',
       packages=find_packages(),
       package_data={
