@@ -223,7 +223,7 @@ https://developer.rebble.io/developer.getpebble.com/legal/sdk-license/index.html
         build_path = os.path.join(path, 'build')
         sdk_path = os.path.join(build_path, 'sdk')
         os.mkdir(dest_path)
-        env_path = os.path.join(dest_path, '.env')
+        env_path = os.path.join(dest_path, '.venv')
         if os.path.exists(os.path.join(sdk_path, 'package.json')):
             shutil.copy2(os.path.join(sdk_path, 'package.json'), os.path.join(dest_path, 'package.json'))
             node_modules_path = os.path.join(dest_path, 'node_modules')

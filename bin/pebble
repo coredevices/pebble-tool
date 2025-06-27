@@ -23,6 +23,6 @@ if [ ! -f "$PEBBLE_PATH/.venv/bin/activate" ]; then
 	exit 1
 fi
 
-export PHONESIM_PATH="$PEBBLE_PATH/.env/bin/pypkjs"
+export PHONESIM_PATH="$PEBBLE_PATH/.venv/bin/pypkjs"
 
-"$PEBBLE_PATH/.env/bin/python" "$PEBBLE_PATH/pebble.py" "$@"
+"$PEBBLE_PATH/.venv/bin/python" "$PEBBLE_PATH/pebble.py" "$@"
