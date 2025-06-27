@@ -38,7 +38,7 @@ def strtobool (val):
         raise ValueError("invalid truth value %r" % (val,))
 
 class SDKManager(object):
-    DOWNLOAD_SERVER = "https://sdk.rebble.io"
+    DOWNLOAD_SERVER = "https://sdk.core.store"
 
     def __init__(self, sdk_dir=None):
         self.sdk_dir = os.path.normpath(sdk_dir or os.path.join(get_persist_dir(), "SDKs"))
