@@ -4,6 +4,7 @@ __author__ = 'katharine'
 import os
 import subprocess
 import logging
+import sys
 
 from pebble_tool.exceptions import (PebbleProjectException, InvalidJSONException, InvalidProjectException,
                                     OutdatedProjectException)
@@ -32,6 +33,8 @@ class SDKProjectCommand(SDKCommand):
         command = [os.path.join(virtualenv, 'bin', 'python'), self.waf_path, command] + args
         logger.debug("waf command: %s", subprocess.list2cmdline(command))
         env = os.environ.copy()
+        env['PYTHONHOME'] = os.path.abspath(virtualenv)
+        env['PYTHONPATH'] = ':'.join(sys.path)
         env['NODE_PATH'] = node_modules
         env['NOCLIMB'] = "1"  # This prevents waf from climbing into parent directories and executing commands
         if extra_env is not None:
