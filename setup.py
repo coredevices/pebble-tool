@@ -21,6 +21,7 @@ requires = [
     'wheel>=0.45.1',
     'colorama>=0.3.3',
     'packaging>=25.0',
+    'pypkjs>=1.1.2'
 ]
 
 if sys.version_info < (3, 4, 0):
