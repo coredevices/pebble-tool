@@ -102,7 +102,7 @@ class SDKManager(object):
             f.seek(0)
             self._install_from_handle(f)
 
-    def install_toolchain_from_url(self, url, sdk_version):
+    def install_toolchain_from_url(self, url, sdk_version, platform_name):
         print("Downloading toolchain...")
         bar = ProgressBar(widgets=[Percentage(), Bar(marker='=', left='[', right=']'), ' ', FileTransferSpeed(), ' ',
                                    Timer(format='%s')])
@@ -117,7 +117,7 @@ class SDKManager(object):
             bar.finish()
             f.flush()
             f.seek(0)
-            self._install_toolchain_from_handle(f, sdk_version)
+            self._install_toolchain_from_handle(f, sdk_version, platform_name)
 
     def install_from_path(self, path):
         with open(path) as f:
@@ -159,12 +159,9 @@ class SDKManager(object):
             self.set_current_sdk(sdk_info['version'])
 
             print("Installing toolchain...")
-            print(self.sdk_dir)
-            print("hello")
-            if platform.system() == 'Darwin':
-                pass
-            else:
-                self.install_toolchain_from_url(self.DOWNLOAD_SERVER + "/release/" + sdk_info['version'] + "/toolchain-linux.tar.gz", sdk_info['version'])
+
+            platform_name = "mac" if platform.system() == "Darwin" else "linux"
+            self.install_toolchain_from_url(f"{self.DOWNLOAD_SERVER}/releases/{sdk_info['version']}/toolchain-{platform_name}.tar.gz", sdk_info['version'], platform_name)
 
             print("Done.")
         except Exception:
@@ -178,7 +175,7 @@ class SDKManager(object):
                 print("Cleanup failed.")
             raise
 
-    def _install_toolchain_from_handle(self, f, sdk_version):
+    def _install_toolchain_from_handle(self, f, sdk_version, platform_name):
         print("Extracting toolchain...")
 
         toolchain_path = os.path.normpath(os.path.join(self.sdk_dir, sdk_version, "toolchain"))
@@ -195,9 +192,9 @@ class SDKManager(object):
             os.mkdir(os.path.join(self.sdk_dir, sdk_version, "toolchain"))
             t.extractall(toolchain_path)
 
-        for folder in os.listdir(os.path.join(toolchain_path, 'toolchain-linux64')):
-            shutil.move(os.path.join(toolchain_path, 'toolchain-linux64', folder), toolchain_path)
-        os.rmdir(os.path.join(toolchain_path, 'toolchain-linux64'))
+        for folder in os.listdir(os.path.join(toolchain_path, 'toolchain-' + platform_name)):
+            shutil.move(os.path.join(toolchain_path, 'toolchain-' + platform_name, folder), toolchain_path)
+        os.rmdir(os.path.join(toolchain_path, 'toolchain-' + platform_name))
 
     def install_remote_sdk(self, version):
         sdk_info = self.request("/v1/files/sdk-core/{}?channel={}".format(version, self.get_channel())).json()
