@@ -36,5 +36,4 @@ def get_sdk_persist_dir(platform, for_sdk_version=None):
 
 def add_tools_to_path():
     if sdk_version():
-        os.environ['PATH'] = "{}:{}".format(os.path.join(get_persist_dir(), "SDKs", sdk_version(), "toolchain", "bin"), os.environ['PATH'])
         os.environ['PATH'] = "{}:{}".format(os.path.join(get_persist_dir(), "SDKs", sdk_version(), "toolchain", "arm-none-eabi", "bin"), os.environ['PATH'])
