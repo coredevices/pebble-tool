@@ -1,5 +1,5 @@
 version_base = (4, 6, 0)
-version_suffix = 'rc2'
+version_suffix = None
 
 if version_suffix is None:
     __version_info__ = version_base
