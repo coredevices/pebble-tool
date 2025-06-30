@@ -35,6 +35,4 @@ def get_sdk_persist_dir(platform, for_sdk_version=None):
     return dir
 
 def add_tools_to_path():
-    override = os.getenv('PEBBLE_TOOLCHAIN_PATH', None)
-    if override is not None:
-        os.environ['PATH'] = "{}:{}".format(override, os.environ['PATH'])
+    os.environ['PATH'] = "{}:{}".format(os.path.join(get_persist_dir(), "SDKs", sdk_version(), "toolchain/arm-cs-tools/bin"), os.environ['PATH'])

@@ -1,6 +1,7 @@
 
 __author__ = 'katharine'
 
+import platform
 from contextlib import closing
 import errno
 import json
@@ -101,6 +102,23 @@ class SDKManager(object):
             f.seek(0)
             self._install_from_handle(f)
 
+    def install_toolchain_from_url(self, url, sdk_version):
+        print("Downloading toolchain...")
+        bar = ProgressBar(widgets=[Percentage(), Bar(marker='=', left='[', right=']'), ' ', FileTransferSpeed(), ' ',
+                                   Timer(format='%s')])
+        bar.start()
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        bar.maxval = int(response.headers['Content-Length'])
+        with tempfile.TemporaryFile() as f:
+            for content in response.iter_content(512):
+                bar.update(bar.currval + len(content))
+                f.write(content)
+            bar.finish()
+            f.flush()
+            f.seek(0)
+            self._install_toolchain_from_handle(f, sdk_version)
+
     def install_from_path(self, path):
         with open(path) as f:
             self._install_from_handle(f)
@@ -139,6 +157,13 @@ class SDKManager(object):
                 invoke_npm(["install", "--silent"], cwd=path)
 
             self.set_current_sdk(sdk_info['version'])
+
+            print("Installing toolchain...")
+            if platform.system() == 'Darwin':
+                pass
+            else:
+                self.install_toolchain_from_url(self.DOWNLOAD_SERVER + "/toolchain/toolchain-linux64.tar.gz", sdk_info['version'])
+
             print("Done.")
         except Exception:
             print("Failed.")
@@ -150,6 +175,29 @@ class SDKManager(object):
             except OSError:
                 print("Cleanup failed.")
             raise
+
+    def _install_toolchain_from_handle(self, f, sdk_version):
+        print("Extracting toolchain...")
+
+        toolchain_path = os.path.normpath(os.path.join(self.sdk_dir, sdk_version, "toolchain"))
+        if os.path.exists(toolchain_path):
+            raise SDKInstallError("Toolchain {} is already installed.".format(sdk_version))
+
+        with tarfile.open(fileobj=f, mode="r:*") as t:
+            contents = t.getnames()
+
+            for filename in contents:
+                if filename.startswith('/') or '..' in filename:
+                    raise SDKInstallError("SDK contained a questionable file: {}".format(filename))
+            if not toolchain_path.startswith(self.sdk_dir):
+                raise SDKInstallError("Suspicious version number: {}".format(toolchain_path))
+
+            os.mkdir(os.path.join(self.sdk_dir, sdk_version, "toolchain"))
+            t.extractall(toolchain_path)
+
+        for folder in os.listdir(os.path.join(toolchain_path, 'toolchain-linux64')):
+            shutil.move(os.path.join(toolchain_path, 'toolchain-linux64', folder), toolchain_path)
+        os.rmdir(os.path.join(toolchain_path, 'toolchain-linux64'))
 
     def install_remote_sdk(self, version):
         sdk_info = self.request("/v1/files/sdk-core/{}?channel={}".format(version, self.get_channel())).json()
