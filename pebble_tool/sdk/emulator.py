@@ -298,13 +298,11 @@ class ManagedEmulatorTransport(WebsocketTransport):
         return path
 
     def _spawn_pypkjs(self):
-        phonesim_bin = os.environ.get('PHONESIM_PATH', 'phonesim.py')
         layout_file = os.path.join(sdk_manager.path_for_sdk(self.version), 'pebble', self.platform, 'qemu',
                                    "layouts.json")
 
         command = [
-            sys.executable,
-            phonesim_bin,
+            "pypkjs",
             "--qemu", "localhost:{}".format(self.qemu_port),
             "--port", str(self.pypkjs_port),
             "--persist", get_sdk_persist_dir(self.platform, self.version),
