@@ -225,6 +225,10 @@ class ManagedEmulatorTransport(WebsocketTransport):
         }
 
         command.extend(platform_args[self.platform])
+
+        # Dylibs for Apple Silicon Macs
+        os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = os.path.join(sdk_manager.root_path_for_sdk(self.version), 'toolchain', 'lib')
+
         logger.info("Qemu command: %s", subprocess.list2cmdline(command))
         process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output())
         time.sleep(0.2)
