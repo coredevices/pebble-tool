@@ -159,10 +159,12 @@ class SDKManager(object):
             self.set_current_sdk(sdk_info['version'])
 
             print("Installing toolchain...")
+            print(self.sdk_dir)
+            print("hello")
             if platform.system() == 'Darwin':
                 pass
             else:
-                self.install_toolchain_from_url(self.DOWNLOAD_SERVER + "/toolchain/toolchain-linux64.tar.gz", sdk_info['version'])
+                self.install_toolchain_from_url(self.DOWNLOAD_SERVER + "/release/" + sdk_info['version'] + "/toolchain-linux.tar.gz", sdk_info['version'])
 
             print("Done.")
         except Exception:
