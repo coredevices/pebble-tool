@@ -180,8 +180,6 @@ class SDKManager(object):
         print("Extracting toolchain...")
 
         toolchain_path = os.path.normpath(os.path.join(self.sdk_dir, sdk_version, "toolchain"))
-        if os.path.exists(toolchain_path):
-            raise SDKInstallError("Toolchain {} is already installed.".format(sdk_version))
 
         with tarfile.open(fileobj=f, mode="r:*") as t:
             contents = t.getnames()
