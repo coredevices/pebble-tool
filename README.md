@@ -57,3 +57,12 @@ Install the app/watchface on your phone (replace IP with your phone's IP shown i
 ```shell
 pebble install --phone IP
 ```
+
+## Troubleshooting
+
+If you run into issues, try uninstalling and re-installing. You can remove the latest SDK with
+```shell
+pebble sdk uninstall 4.4
+```
+
+You can also delete pebble-tool's entire data directory, located at ~/.pebble-sdk on Linux and ~/Library/Application Support/Pebble SDK on Mac.
