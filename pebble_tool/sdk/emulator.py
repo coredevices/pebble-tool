@@ -324,7 +324,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
         time.sleep(0.5)
         if process.poll() is not None:
             try:
-                subprocess.check_output(command, stderr=subprocess.STDOUT)
+                subprocess.check_output(command, stderr=subprocess.STDOUT, text=True)
             except subprocess.CalledProcessError as e:
                 raise MissingEmulatorError("Couldn't launch pypkjs:\n{}".format(e.output.strip()))
         self.pypkjs_pid = process.pid
