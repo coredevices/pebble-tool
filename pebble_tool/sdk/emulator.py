@@ -306,7 +306,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
                                    "layouts.json")
 
         command = [
-            "pypkjs",
+            sys.executable, "-m", "pypkjs",
             "--qemu", "localhost:{}".format(self.qemu_port),
             "--port", str(self.pypkjs_port),
             "--persist", get_sdk_persist_dir(self.platform, self.version),
