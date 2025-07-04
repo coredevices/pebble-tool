@@ -1,2 +1,4 @@
 *.pyc
 .idea/*
+build/
+pebble_tool.egg-info/
