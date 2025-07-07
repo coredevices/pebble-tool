@@ -4,18 +4,14 @@ The command-line tool for the Pebble SDK.
 
 ## About
 
-We've been working on porting the Pebble SDK from Python 2 to Python 3. This involves the following:
-1. The command-line tool to build and install Pebble apps (this repository)
+The Pebble SDK now runs in Python 3. This includes:
+1. The command-line tool to build and install apps and watchfaces (this repository).
 2. The SDK code in PebbleOS (https://github.com/coredevices/PebbleOS/tree/main/sdk). This isn't fully working yet, so pebble-tool currently uses a patched version of the existing SDK core (version 4.3) that has been modified for Python 3.
-3. pypkjs (https://github.com/coredevices/pypkjs), which allows PebbleKitJS code to run in the QEMU emulator
+3. pypkjs (https://github.com/coredevices/pypkjs), which allows PebbleKitJS code to run in the QEMU emulator.
 
-## Changes
+Previously, the Pebble SDK was installed by downloading a tar file containing pebble-tool, the toolchain, and executables for PebbleOS QEMU and pebble-tool. Users had to decide where to extract the file, add the binaries to their PATH, and configure a virtualenv.
 
-The project has been ported from Python 2 to 3. Dependencies have been updated as well.
-
-The previous version of pebble-tool was designed to be downloaded as part of a large tar file that contained the toolchain, QEMU binary, and an executable for pebble-tool. Users had to configure a virtualenv, add the binaries to PATH, and decide where to install pebble-tool to their system. This version is instead installed through pip/uv.
-
-Toolchain (arm-none-eabi) and QEMU binary installation are handled as part of `pebble sdk install` rather than being bundled with pebble-tool.
+Now, pebble-tool is a standalone command-line tool that can be installed through pip/uv. The toolchain (arm-none-eabi) and QEMU binary are no longer bundled, but instead installed when `pebble sdk install` is run.
 
 ## Installation
 
