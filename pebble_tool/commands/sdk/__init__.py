@@ -31,21 +31,21 @@ class SDKCommand(BaseCommand):
         add_tools_to_path()
 
     def _fix_python(self):
-        # First figure out what 'python' means:
+        # First figure out what 'python3' means:
         try:
-            version = int(subprocess.check_output(["python", "-c", "import sys; print(sys.version_info[0])"]).strip())
+            version = int(subprocess.check_output(["python3", "-c", "import sys; print(sys.version_info[0])"]).strip())
         except (subprocess.CalledProcessError, ValueError):
-            raise ToolError("'python' doesn't mean anything on this system.")
+            raise ToolError("'python3' doesn't mean anything on this system.")
 
-        if version != 2:
+        if version == 3:
             try:
                 python3_version = int(subprocess.check_output(["python3", "-c",
                                                                 "import sys; print(sys.version_info[1])"]).strip())
             except (subprocess.CalledProcessError, ValueError):
-                raise ToolError("Can't find a python2 interpreter.")
+                raise ToolError("Can't find a python 3 interpreter.")
             if python3_version < 8:
                 raise ToolError("Require python 3.8+ to run the build tools; got 3.{}".format(python3_version))
-            # We have a viable python2. Use our hack to stick 'python' into the path.
+            # We have a viable python3. Use our hack to stick 'python3' into the path.
             os.environ['PATH'] = '{}:{}'.format(os.path.normpath(os.path.dirname(__file__)), os.environ['PATH'])
 
     def __call__(self, args):
