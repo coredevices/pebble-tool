@@ -19,15 +19,7 @@ Toolchain (arm-none-eabi) and QEMU binary installation are handled as part of `p
 
 ## Installation
 
-With `pipx`:
 ```shell
-pipx install pypkjs
-pipx install pebble-tool
-```
-
-With `uv`:
-```shell
-uv tool install pypkjs
 uv tool install pebble-tool
 ```
 
