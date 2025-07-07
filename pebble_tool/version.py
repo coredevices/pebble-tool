@@ -1,4 +1,4 @@
-version_base = (4, 6, 0)
+version_base = (5, 0, 0)
 version_suffix = None
 
 if version_suffix is None:
