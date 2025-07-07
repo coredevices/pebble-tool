@@ -31,6 +31,19 @@ uv tool install pypkjs
 uv tool install pebble-tool
 ```
 
+Install dependencies (MacOS):
+```shell
+brew update
+brew install boost-python
+brew install glib
+brew install pixman
+```
+
+Install dependencies (Linux):
+```shell
+sudo apt-get install libsdl1.2debian libfdt1 libpixman-1-0
+```
+
 ## Usage
 
 Install the latest SDK:
