@@ -2,6 +2,7 @@
 __author__ = 'katharine'
 
 import os
+import shutil
 
 from pebble_tool.exceptions import MissingSDK
 from pebble_tool.util import get_persist_dir
@@ -35,5 +36,5 @@ def get_sdk_persist_dir(platform, for_sdk_version=None):
     return dir
 
 def add_tools_to_path():
-    if sdk_version():
+    if sdk_version() and not shutil.which("arm-none-eabi-gcc"):
         os.environ['PATH'] = "{}:{}".format(os.path.join(get_persist_dir(), "SDKs", sdk_version(), "toolchain", "arm-none-eabi", "bin"), os.environ['PATH'])

@@ -5,6 +5,7 @@ import atexit
 import argparse
 import logging
 import os
+import shutil
 import sys
 import requests.packages.urllib3 as urllib3
 from pebble_tool.util import get_persist_dir
@@ -38,8 +39,9 @@ def run_tool(args=None):
     version_string = "Pebble Tool v{}".format(__version__)
     if sdk_version() is not None:
         version_string += " (active SDK: v{})".format(sdk_version())
-        # Add QEMU and others to PATH
-        os.environ['PATH'] = "{}:{}".format(os.path.join(get_persist_dir(), "SDKs", sdk_version(), "toolchain", "bin"), os.environ['PATH'])
+        # Add QEMU and others to PATH, if not already present
+        if not shutil.which("qemu-pebble"):
+            os.environ['PATH'] = "{}:{}".format(os.path.join(get_persist_dir(), "SDKs", sdk_version(), "toolchain", "bin"), os.environ['PATH'])
     parser.add_argument("--version", action="version", version=version_string)
     register_children(parser)
     args = parser.parse_args(args)
