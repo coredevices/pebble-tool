@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import tarfile
+import textwrap
 
 from pebble_tool.exceptions import SDKInstallError, MissingSDK
 from pebble_tool.sdk.requirements import Requirements
@@ -22,21 +23,6 @@ from pebble_tool.util.npm import invoke_npm
 from pebble_tool.util.versions import version_to_key
 
 pebble_platforms = ('aplite', 'basalt', 'chalk', 'diorite', 'emery')
-
-def strtobool (val):
-    """Convert a string representation of truth to true (1) or false (0).
-
-    True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values
-    are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
-    'val' is anything else.
-    """
-    val = val.lower()
-    if val in ('y', 'yes', 't', 'true', 'on', '1'):
-        return 1
-    elif val in ('n', 'no', 'f', 'false', 'off', '0'):
-        return 0
-    else:
-        raise ValueError("invalid truth value %r" % (val,))
 
 class SDKManager(object):
     DOWNLOAD_SERVER = "https://sdk.core.store"
@@ -239,26 +225,16 @@ class SDKManager(object):
         self.install_from_url(sdk_info['url'])
 
     def _license_prompt(self):
-        prompt = """To use the Pebble SDK, you must agree to the following:
+        prompt = textwrap.dedent("""
+        By using the Pebble SDK, you agree to the following:
 
-PEBBLE TERMS OF USE
-https://developer.rebble.io/developer.getpebble.com/legal/terms-of-use/index.html
-
-PEBBLE DEVELOPER LICENSE
-https://developer.rebble.io/developer.getpebble.com/legal/sdk-license/index.html
-"""
+        PEBBLE TERMS OF USE
+        https://developer.rebble.io/developer.getpebble.com/legal/terms-of-use/index.html
+        
+        PEBBLE DEVELOPER LICENSE
+        https://developer.rebble.io/developer.getpebble.com/legal/sdk-license/index.html
+        """)
         print(prompt)
-        result = False
-        while True:
-            try:
-                result = strtobool(input("Do you accept the Pebble Terms of Use and the "
-                                             "Pebble Developer License? (y/n) "))
-            except ValueError:
-                pass
-            else:
-                break
-        if not result:
-            raise SDKInstallError("You must accept the Terms of Use and Developer License to install an SDK.")
 
     def set_current_sdk(self, version):
         path = os.path.join(self.sdk_dir, version)
