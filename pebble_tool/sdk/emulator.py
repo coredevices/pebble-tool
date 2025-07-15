@@ -236,7 +236,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
             try:
                 subprocess.check_output(command, stderr=subprocess.STDOUT)
             except subprocess.CalledProcessError as e:
-                raise MissingEmulatorError("Couldn't launch emulator:\n{}".format(e.output.strip()))
+                raise MissingEmulatorError("Couldn't launch emulator:\n{}".format(e.output.decode('utf-8').strip()))
         self.qemu_pid = process.pid
         self._wait_for_qemu()
 
@@ -326,7 +326,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
             try:
                 subprocess.check_output(command, stderr=subprocess.STDOUT, text=True)
             except subprocess.CalledProcessError as e:
-                raise MissingEmulatorError("Couldn't launch pypkjs:\n{}".format(e.output.strip()))
+                raise MissingEmulatorError("Couldn't launch pypkjs:\n{}".format(e.output.decode('utf-8').strip()))
         self.pypkjs_pid = process.pid
 
     def _get_output(self):
