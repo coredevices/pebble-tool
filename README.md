@@ -66,3 +66,8 @@ pebble sdk uninstall 4.4
 ```
 
 You can also delete pebble-tool's entire data directory, located at ~/.pebble-sdk on Linux and ~/Library/Application Support/Pebble SDK on Mac.
+
+---
+#### Updating the PYPI package
+1. Increment the version in [version.py](pebble_tool/version.py)
+2. Create a new release with a tag of the version number with a "v" in front
