@@ -40,6 +40,9 @@ def run_tool(args=None):
         version_string += " (active SDK: v{})".format(sdk_version())
         # Add QEMU and others to PATH
         os.environ['PATH'] = "{}:{}".format(os.path.join(get_persist_dir(), "SDKs", sdk_version(), "toolchain", "bin"), os.environ['PATH'])
+        extra_path = os.environ['PEBBLE_EXTRA_PATH']
+        if extra_path:
+            os.environ['PATH'] = "{}:{}".format(extra_path, os.environ['PATH'])
     parser.add_argument("--version", action="version", version=version_string)
     register_children(parser)
     args = parser.parse_args(args)
