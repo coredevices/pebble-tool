@@ -190,8 +190,6 @@ class SDKManager(object):
 
             self.set_current_sdk(sdk_info['version'])
 
-            print("Installing toolchain...")
-
             platform_name = "mac" if platform.system() == "Darwin" else "linux"
             self.install_toolchain_from_url(f"{self.DOWNLOAD_SERVER}/releases/{sdk_info['version']}/toolchain-{platform_name}.tar.gz", sdk_info['version'], platform_name)
 
