@@ -87,12 +87,28 @@ class SDKManager(object):
 
     def install_from_url(self, url):
         print("Downloading...")
-        bar = ProgressBar(widgets=[Percentage(), Bar(marker='=', left='[', right=']'), ' ', FileTransferSpeed(), ' ',
-                                   Timer(format='%s')])
+
+        response = requests.head(url)
+        response.raise_for_status()
+        total_size = int(response.headers.get('content-length', 0))
+
+        bar = ProgressBar(
+            maxval=total_size,
+            widgets=[
+                Percentage(),
+                Bar(marker='=', left='[', right=']'),
+                ' ',
+                FileTransferSpeed(),
+                ' ',
+                Timer(format='%s')
+            ]
+        )
+
         bar.start()
+
         response = requests.get(url, stream=True)
         response.raise_for_status()
-        bar.maxval = int(response.headers['Content-Length'])
+
         with tempfile.TemporaryFile() as f:
             for content in response.iter_content(512):
                 bar.update(bar.currval + len(content))
@@ -104,12 +120,28 @@ class SDKManager(object):
 
     def install_toolchain_from_url(self, url, sdk_version, platform_name):
         print("Downloading toolchain...")
-        bar = ProgressBar(widgets=[Percentage(), Bar(marker='=', left='[', right=']'), ' ', FileTransferSpeed(), ' ',
-                                   Timer(format='%s')])
+
+        response = requests.head(url)
+        response.raise_for_status()
+        total_size = int(response.headers.get('content-length', 0))
+
+        bar = ProgressBar(
+            maxval=total_size,
+            widgets=[
+                Percentage(),
+                Bar(marker='=', left='[', right=']'),
+                ' ',
+                FileTransferSpeed(),
+                ' ',
+                Timer(format='%s')
+            ]
+        )
+
         bar.start()
+
         response = requests.get(url, stream=True)
         response.raise_for_status()
-        bar.maxval = int(response.headers['Content-Length'])
+
         with tempfile.TemporaryFile() as f:
             for content in response.iter_content(512):
                 bar.update(bar.currval + len(content))
