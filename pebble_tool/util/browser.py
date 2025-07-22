@@ -34,13 +34,13 @@ class BrowserController(object):
                 if path == '/close':
                     self.send_response(200)
                     self.end_headers()
-                    self.wfile.write("OK")
+                    self.wfile.write(b"OK")
                     running[0] = False
                     callback(query)
                 else:
                     self.send_response(404)
                     self.end_headers()
-                    self.wfile.write("Not Found")
+                    self.wfile.write(b"Not Found")
 
         server = BaseHTTPServer.HTTPServer(('', port), AppConfigHandler)
         while running[0]:
