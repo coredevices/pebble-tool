@@ -85,21 +85,21 @@ class BrowserController(object):
                     self.send_header('Content-type', 'text/html')
                     self.end_headers()
                     self.wfile.write(SENSOR_PAGE_HTML.format(websocket_host="'{}'".format(controller._get_ip()),
-                                                             websocket_port="'{}'".format(pypkjs_port)))
+                                                             websocket_port="'{}'".format(pypkjs_port)).encode())
                 elif file_path in self.PERMITTED_PATHS:
                     try:
                         file_contents = open(os.path.join(os.path.dirname(os.path.realpath(__file__)), file_path))
                         self.send_response(200)
                         self.end_headers()
-                        self.wfile.write(file_contents.read())
+                        self.wfile.write(file_contents.read().encode())
                     except IOError:
                         self.send_response(404)
                         self.end_headers()
-                        self.wfile.write("Not Found")
+                        self.wfile.write(b"Not Found")
                 else:
                     self.send_response(403)
                     self.end_headers()
-                    self.wfile.write("Forbidden")
+                    self.wfile.write(b"Forbidden")
 
             def log_request(self, code='-', size='-'):
                 logger.debug("{} - - [{}] '{}' {} {}".format(self.client_address[0], self.log_date_time_string(),
