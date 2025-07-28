@@ -1,0 +1,58 @@
+[project]
+name = "pebble-tool"
+version = "5.0.5"
+description = "Tool for interacting with pebbles"
+readme = "README.md"
+authors = [
+    { name = "Core Devices LLC", email = "griffin@griffinli.com" }
+]
+license = "MIT"
+requires-python = ">=3.9"
+dependencies = [
+    "colorama>=0.3.3",
+    "freetype-py>=2.5.1",
+    "httplib2>=0.19.0",
+    "libpebble2>=0.0.28",
+    "oauth2client>=4.1.3",
+    "packaging>=25.0",
+    "progressbar2>=2.7.3",
+    "pyasn1>=0.1.8",
+    "pyasn1-modules>=0.0.6",
+    "pypkjs>=2.0.0",
+    "pypng>=0.20220715.0",
+    "pyqrcode>=1.1",
+    "pyserial>=3.5",
+    "requests>=2.32.4",
+    "rsa>=4.9.1",
+    "six>=1.17.0",
+    "sourcemap>=0.2.0",
+    "websocket-client>=1.8.0",
+    "wheel>=0.45.1",
+]
+
+[project.urls]
+source = "https://github.com/coredevices/pebble-tool"
+
+[project.scripts]
+pebble = "pebble_tool:run_tool"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "pebble_tool/version.py"
+
+[tool.hatch.build]
+artifacts = [
+    "pebble_tool/commands/sdk/python",
+    "pebble_tool/sdk/templates/*",
+    "pebble_tool/util/static/**/*",
+    "pebble_tool/util/static/*.*"
+]
+packages = ["pebble_tool"]
+
+[dependency-groups]
+dev = [
+    "hatchling",
+]
