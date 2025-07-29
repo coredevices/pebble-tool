@@ -21,6 +21,10 @@ def configure(ctx):
     Universal configuration: add your change prior to calling ctx.load('pebble_sdk').
     """
     ctx.load('pebble_sdk')
+    # this will generate build/compile_commands.json
+    # this allows clangd to provide code code completion, go-to-definition, etc.
+    # see https://clangd.llvm.org/installation#editor-plugins
+    ctx.load('clang_compilation_database')
 
 
 def build(ctx):
