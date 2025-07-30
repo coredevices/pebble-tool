@@ -1,0 +1,21 @@
+{
+  "name": "${project_name}",
+  "author": "MakeAwesomeHappen",
+  "version": "1.0.0",
+  "files": ["dist.zip"],
+  "keywords": ["pebble-package"],
+  "dependencies": {},
+  "pebble": {
+    "projectType": "package",
+    "sdkVersion": "${sdk_version}",
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "chalk",
+      "diorite"
+    ],
+    "resources": {
+      "media": []
+    }
+  }
+}

@@ -1,6 +1,6 @@
 {
     "default": {
-        ".gitignore": ["common/gitignore", "gitignore"]
+        ".gitignore": "gitignore"
     },
     "rocky": {
         "default": {
@@ -12,22 +12,19 @@
     },
     "app": {
         "default": {
-            "src/${project_name}.c": ["app/main.c", "main.c"],
-            "wscript": ["app/wscript", "wscript"],
+            "src/c/${project_name}.c": "app/main.c",
+            "wscript": "app/wscript",
             "package.json": "app/package.json",
             "resources": null
         },
-        "appinfo": {
-            "appinfo.json": ["app/appinfo.json", "appinfo.json"]
-        },
         "worker": {
-            "worker_src/${project_name}_worker.c": ["app/worker.c", "worker.c"]
+            "worker_src/c/${project_name}_worker.c": "app/worker.c"
         },
         "simple": {
-            "src/${project_name}.c": ["app/simple.c", "simple.c"]
+            "src/c/${project_name}.c": "app/simple.c"
         },
         "javascript": {
-            "src/js/app.js": ["app/app.js", "app.js"]
+            "src/pkjs/index.js": "app/index.js"
         }
     },
     "lib": {
@@ -35,6 +32,7 @@
             "src/c/${project_name}.c": "lib/lib.c",
             "include/${project_name}.h": "lib/lib.h",
             "wscript": "lib/wscript",
+            "package.json": "lib/package.json",
             "src/resources": null
         },
         "javascript": {
