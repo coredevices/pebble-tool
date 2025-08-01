@@ -22,7 +22,8 @@ requires = [
     'colorama>=0.3.3',
     'packaging>=25.0',
     'pypkjs>=2.0.0',
-    'freetype-py>=2.5.1'
+    'freetype-py>=2.5.1',
+    'websockify>=0.13.0'
 ]
 
 if sys.version_info < (3, 4, 0):

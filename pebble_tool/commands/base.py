@@ -266,8 +266,9 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
     def _connect_args(cls, args):
         emulator_platform = getattr(args, 'emulator', None)
         emulator_sdk = getattr(args, 'sdk', None)
+        vnc_enabled = getattr(args, 'vnc', False)
         if emulator_platform:
-            return emulator_platform, emulator_sdk
+            return emulator_platform, emulator_sdk, vnc_enabled
         elif 'PEBBLE_EMULATOR' in os.environ:
             emulator_platform = os.environ['PEBBLE_EMULATOR']
             if emulator_platform not in pebble_platforms:
@@ -281,7 +282,7 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
             elif len(running) > 1:
                 raise ToolError("Multiple emulators are running; you must specify which to use.")
 
-        return (emulator_platform, emulator_sdk)
+        return (emulator_platform, emulator_sdk, vnc_enabled)
 
     @classmethod
     def post_connect(cls, connection):
@@ -300,6 +301,7 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
                            choices=pebble_platforms)
         emu_group.add_argument('--sdk', type=str, help="SDK version to launch. Defaults to the active SDK"
                                                    " (currently {})".format(sdk_version()))
+        emu_group.add_argument('--vnc', action='store_true', help="Enable VNC server for the emulator")
 
 def register_children(parser):
     subparsers = parser.add_subparsers(title="command")

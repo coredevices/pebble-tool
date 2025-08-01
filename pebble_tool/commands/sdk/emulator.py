@@ -27,6 +27,8 @@ class KillCommand(BaseCommand):
             for version in list(platform.values()):
                 self._kill_if_running(version['qemu']['pid'], s)
                 self._kill_if_running(version['pypkjs']['pid'], s)
+                if 'websockify' in version:
+                    self._kill_if_running(version['websockify']['pid'], s)
 
     @classmethod
     def _kill_if_running(cls, pid, signal_number):

@@ -87,9 +87,11 @@ def update_emulator_info(platform, version, new_content):
 
 
 class ManagedEmulatorTransport(WebsocketTransport):
-    def __init__(self, platform, version=None):
+    def __init__(self, platform, version=None, vnc_enabled=False):
         self.platform = platform
         self.version = version
+        self.vnc_enabled = vnc_enabled
+        self.websockify_pid = None
         self._find_ports()
         super(ManagedEmulatorTransport, self).__init__('ws://localhost:{}/'.format(self.pypkjs_port))
 
@@ -110,13 +112,24 @@ class ManagedEmulatorTransport(WebsocketTransport):
         qemu_running = False
         if info is not None:
             self.version = info['version']
-            if self._is_pid_running(info['qemu']['pid']):
+            existing_vnc = info['qemu'].get('vnc', False)
+            if self._is_pid_running(info['qemu']['pid']) and existing_vnc == self.vnc_enabled:
                 qemu_running = True
                 self.qemu_port = info['qemu']['port']
                 self.qemu_serial_port = info['qemu']['serial']
                 self.qemu_pid = info['qemu']['pid']
                 self.qemu_gdb_port = info['qemu'].get('gdb', None)
             else:
+                # Kill existing QEMU if VNC state doesn't match
+                if self._is_pid_running(info['qemu']['pid']) and existing_vnc != self.vnc_enabled:
+                    logger.info("Killing existing QEMU because VNC state changed (was %s, now %s)", existing_vnc, self.vnc_enabled)
+                    os.kill(info['qemu']['pid'], signal.SIGKILL)
+                    # Also kill pypkjs since it depends on QEMU
+                    if self._is_pid_running(info['pypkjs']['pid']):
+                        os.kill(info['pypkjs']['pid'], signal.SIGKILL)
+                    # Kill websockify if it was running
+                    if existing_vnc and 'websockify' in info and self._is_pid_running(info['websockify']['pid']):
+                        os.kill(info['websockify']['pid'], signal.SIGKILL)
                 self.qemu_pid = None
 
             if self._is_pid_running(info['pypkjs']['pid']):
@@ -140,6 +153,21 @@ class ManagedEmulatorTransport(WebsocketTransport):
 
         if self.pypkjs_pid is None:
             self.pypkjs_port = self._choose_port()
+        
+        # Handle websockify for VNC mode
+        if self.vnc_enabled:
+            if info is not None and 'websockify' in info and self._is_pid_running(info['websockify']['pid']) and qemu_running:
+                # Check if websockify is responsive
+                if self._is_websockify_responsive():
+                    logger.info("Existing websockify (pid %d) is responsive, reusing it.", info['websockify']['pid'])
+                    self.websockify_pid = info['websockify']['pid']
+                else:
+                    # Kill unresponsive websockify
+                    logger.info("Existing websockify (pid %d) is unresponsive, killing it.", info['websockify']['pid'])
+                    os.kill(info['websockify']['pid'], signal.SIGKILL)
+                    self.websockify_pid = None
+            else:
+                self.websockify_pid = None
 
     def _spawn_processes(self):
         if self.version is None:
@@ -156,6 +184,15 @@ class ManagedEmulatorTransport(WebsocketTransport):
             self._spawn_pypkjs()
         else:
             logger.info("pypkjs is already running.")
+        
+        # Spawn websockify if VNC is enabled
+        if self.vnc_enabled:
+            if self.websockify_pid is None:
+                print("Launching VNC...")
+                logger.info("Spawning websockify for VNC access.")
+                self._spawn_websockify()
+            else:
+                logger.info("websockify is already running.")
 
         self._save_state()
 
@@ -166,6 +203,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
                 'port': self.qemu_port,
                 'serial': self.qemu_serial_port,
                 'gdb': self.qemu_gdb_port,
+                'vnc': self.vnc_enabled,
             },
             'pypkjs': {
                 'pid': self.pypkjs_pid,
@@ -173,6 +211,11 @@ class ManagedEmulatorTransport(WebsocketTransport):
             },
             'version': self.version,
         }
+        # Add websockify info if VNC is enabled
+        if self.vnc_enabled and self.websockify_pid:
+            d['websockify'] = {
+                'pid': self.websockify_pid,
+            }
         update_emulator_info(self.platform, self.version, d)
 
 
@@ -195,6 +238,10 @@ class ManagedEmulatorTransport(WebsocketTransport):
             "-pflash", qemu_micro_flash,
             "-gdb", "tcp::{},server,nowait".format(self.qemu_gdb_port),
         ]
+
+        if self.vnc_enabled:
+            command.extend(["-L", os.path.join(sdk_manager.root_path_for_sdk(self.version), 'toolchain', 'lib', 'pc-bios')])
+            command.extend(["-vnc", ":1"])
 
         platform_args = {
             'emery': [
@@ -301,6 +348,25 @@ class ManagedEmulatorTransport(WebsocketTransport):
             self._copy_spi_image(path)
         return path
 
+    def _spawn_websockify(self):
+        command = [
+            sys.executable, "-m", "websockify",
+            '--heartbeat=30',              # Send heartbeat every 30 seconds to keep connection alive
+            '6080',                        # WebSocket port (fixed)
+            'localhost:5901'               # VNC server (QEMU on display :1)
+        ]
+        
+        logger.info("websockify command: %s", subprocess.list2cmdline(command))
+        process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output())
+        time.sleep(0.5)
+        if process.poll() is not None:
+            try:
+                subprocess.check_output(command, stderr=subprocess.STDOUT)
+            except subprocess.CalledProcessError as e:
+                raise MissingEmulatorError("Couldn't launch websockify:\n{}".format(e.output.decode('utf-8').strip()))
+        self.websockify_pid = process.pid
+        logger.info("Websockify running on port 6080, proxying to VNC display :1")
+
     def _spawn_pypkjs(self):
         layout_file = os.path.join(sdk_manager.path_for_sdk(self.version), 'pebble', self.platform, 'qemu',
                                    "layouts.json")
@@ -354,6 +420,27 @@ class ManagedEmulatorTransport(WebsocketTransport):
             else:
                 raise
         return True
+    
+    def _is_websockify_responsive(self):
+        """Quick check if websockify is actually responding to HTTP"""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+
+            if sock.connect_ex(('localhost', 6080)) != 0:
+                sock.close()
+                return False
+
+            sock.send(b"GET / HTTP/1.0\r\n\r\n")
+            
+            # Just check for HTTP response header (first 12 bytes is enough)
+            response = sock.recv(12)
+            sock.close()
+            
+            # Any HTTP response means it's alive (broken websockify sends nothing)
+            return b"HTTP" in response
+        except:
+            return False
 
     @classmethod
     def is_emulator_alive(cls, platform, version=None):
