@@ -15,9 +15,9 @@ Now, pebble-tool is a standalone command-line tool that can be installed through
 
 ## Installation
 
-Installation instructions are at https://developer.repebble.com/sdk!
+Instructions are at https://developer.repebble.com/sdk
 
-It's super simple: just install some platform-specific dependencies, then install pebble-tool via `uv`.
+It's super simple: install a few platform-specific dependencies, then install pebble-tool via `uv`.
 
 ## Troubleshooting
 
