@@ -13,17 +13,31 @@ Previously, the Pebble SDK was installed by downloading a tar file containing pe
 
 Now, pebble-tool is a standalone command-line tool that can be installed through pip/uv. The toolchain (arm-none-eabi) and QEMU binary are no longer bundled, but instead installed when `pebble sdk install` is run.
 
+## Prequisites
+
+### macOS requires python 3.11+
+
+> macOS' default Python installation of 3.9 will fail to install `pebble-tool` with the following error: "Failed to build `stpyv8==13.1.201.22`". Using Python 3.13 fixes this.
+
+```shell
+brew update
+brew install python@3.13
+
+# Verify your python version is 3.13
+/opt/homebrew/bin/python3 --version
+
+# Create a virtual environment
+/opt/homebrew/bin/python3 -m venv venv
+source venv/bin/activate && python --version
+
+brew install glib
+brew install pixman
+```
+
 ## Installation
 
 ```shell
 uv tool install pebble-tool
-```
-
-Install dependencies (MacOS):
-```shell
-brew update
-brew install glib
-brew install pixman
 ```
 
 Install dependencies (Linux):
