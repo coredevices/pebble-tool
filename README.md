@@ -13,64 +13,11 @@ Previously, the Pebble SDK was installed by downloading a tar file containing pe
 
 Now, pebble-tool is a standalone command-line tool that can be installed through pip/uv. The toolchain (arm-none-eabi) and QEMU binary are no longer bundled, but instead installed when `pebble sdk install` is run.
 
-## Prequisites
-
-### macOS requires python 3.11+
-
-> macOS' default Python installation of 3.9 will fail to install `pebble-tool` with the following error: "Failed to build `stpyv8==13.1.201.22`". Using Python 3.13 fixes this.
-
-```shell
-brew update
-brew install python@3.13
-
-# Verify your python version is 3.13
-/opt/homebrew/bin/python3 --version
-
-# Create a virtual environment
-/opt/homebrew/bin/python3 -m venv venv
-source venv/bin/activate && python --version
-
-brew install glib
-brew install pixman
-```
-
 ## Installation
 
-```shell
-uv tool install pebble-tool
-```
+Installation instructions are at https://developer.repebble.com/sdk!
 
-Install dependencies (Linux):
-```shell
-sudo apt-get install libsdl1.2debian libfdt1
-```
-
-## Usage
-
-Install the latest SDK:
-```shell
-pebble sdk install latest
-```
-
-Create a new project (for example, called myproject):
-```shell
-pebble new-project myproject
-```
-
-`cd` into the folder you just created, then compile it:
-```shell
-pebble build
-```
-
-Install the app/watchface on an emulator for the Pebble Time:
-```shell
-pebble install --emulator basalt
-```
-
-Install the app/watchface on your phone (replace IP with your phone's IP shown in the Pebble app):
-```shell
-pebble install --phone IP
-```
+It's super simple: just install some platform-specific dependencies, then install pebble-tool via `uv`.
 
 ## Troubleshooting
 
