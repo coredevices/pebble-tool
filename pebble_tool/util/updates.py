@@ -59,7 +59,7 @@ class UpdateChecker(threading.Thread):
 
 
 def _print(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
+    print(*args, **kwargs)
 
 
 def _handle_sdk_update(version, release_notes=None):
