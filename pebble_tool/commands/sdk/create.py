@@ -151,6 +151,8 @@ class NewProjectCommand(SDKCommand):
                 options.append('simple')
             if args.worker:
                 options.append('worker')
+            if args.ai:
+                options.append('ai')
 
         # Hack for old SDKs that need an appinfo, because the declarative system can't
         # handle "this, but only if not that." For "tintin" SDKs and unparseble
@@ -180,6 +182,7 @@ class NewProjectCommand(SDKCommand):
         c_group.add_argument("--simple", action="store_true", help="Create a minimal C file.")
         c_group.add_argument("--javascript", action="store_true", help="Generate a JavaScript file.")
         c_group.add_argument("--worker", action="store_true", help="Generate a background worker.")
+        c_group.add_argument("--ai", action="store_true", help="Generate templates for Claude Code and Cursor")
         return parser
 
 

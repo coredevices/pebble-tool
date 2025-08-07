@@ -25,6 +25,10 @@
         },
         "javascript": {
             "src/pkjs/index.js": "app/index.js"
+        },
+        "ai": {
+            "CLAUDE.md": "app/ai.md",
+            ".cursor/rules/pebble.mdc": "app/ai.md"
         }
     },
     "lib": {
