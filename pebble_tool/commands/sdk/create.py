@@ -128,10 +128,12 @@ class NewProjectCommand(SDKCommand):
         super(NewProjectCommand, self).__call__(args)
 
         template_paths = [
-            os.path.join(self.get_sdk_path(), 'pebble', 'common', 'templates'),
             os.path.join(os.path.dirname(__file__), '..', '..', 'sdk', 'templates')
         ]
 
+        # Ensure SDK is installed (get_sdk_path triggers installation if needed)
+        self.get_sdk_path()
+        
         sdk = self.sdk or sdk_version()
         sdk2 = (sdk == "2.9")
 
