@@ -10,7 +10,8 @@ import threading
 import time
 import requests
 
-from pebble_tool.version import __version__
+from importlib.metadata import version
+__version__ = version('pebble-tool')
 from pebble_tool.sdk import sdk_manager
 from pebble_tool.util.config import config
 from pebble_tool.util.versions import version_to_key

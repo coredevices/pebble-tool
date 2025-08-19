@@ -16,7 +16,12 @@ from .util.analytics import wait_for_analytics, analytics_prompt
 from .util.config import config
 from .util.updates import wait_for_update_checks
 from .util.wsl import maybe_apply_wsl_hacks
-from .version import __version__, __version_info__
+from importlib.metadata import version
+
+__version__ = version('pebble-tool')
+# Parse version into version_info tuple
+parts = __version__.split('.')
+__version_info__ = tuple(int(p) for p in parts[:3])
 
 # Violating PEP8 for custom command ordering for `pebble -h`
 from .commands.sdk import manage

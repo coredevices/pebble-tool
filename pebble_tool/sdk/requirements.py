@@ -7,7 +7,8 @@ import subprocess
 import sys
 
 from pebble_tool.exceptions import ToolError
-from pebble_tool.version import __version__
+from importlib.metadata import version
+__version__ = version('pebble-tool')
 
 __author__ = 'katharine'
 __all__ = ['Requirements']

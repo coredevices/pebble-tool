@@ -19,7 +19,8 @@ from pebble_tool.sdk.project import PebbleProject
 from pebble_tool.exceptions import MissingSDK, PebbleProjectException
 from pebble_tool.sdk import sdk_path, sdk_version, get_persist_dir
 from pebble_tool.util.wsl import is_secretly_windows
-from pebble_tool.version import __version__
+from importlib.metadata import version
+__version__ = version('pebble-tool')
 
 logger = logging.getLogger("pebble_tool.util.analytics")
 
