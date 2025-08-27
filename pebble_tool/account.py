@@ -13,10 +13,11 @@ import oauth2client.tools as tools
 
 from pebble_tool.util import get_persist_dir
 
-AUTH_SERVER   = os.getenv("PEBBLE_OAUTH_SERVER", "https://auth.rebble.io")
-AUTHORIZE_URI = AUTH_SERVER + "/oauth/authorise"
-TOKEN_URI     = AUTH_SERVER + "/oauth/token"
-ME_URI        = AUTH_SERVER + "/api/v1/me"
+AUTH_SERVER   = os.getenv("PEBBLE_OAUTH_SERVER", "https://github.com")
+API_SERVER    = os.getenv("PEBBLE_OAUTH_API_SERVER", "https://api.github.com")
+AUTHORIZE_URI = AUTH_SERVER + "/login/oauth/authorize"
+TOKEN_URI     = AUTH_SERVER + "/login/oauth/access_token"
+ME_URI        = API_SERVER + "/user"
 
 SDK_CLIENT_ID     = os.getenv("PEBBLE_OAUTH_APP_ID", "Iv23likC9qHcKRPfqCRu")
 SDK_CLIENT_SECRET = os.getenv("PEBBLE_OAUTH_APP_SECRET", "f7a3280b328d14fae132c5f97b4f151f13936f4f")
@@ -120,9 +121,8 @@ class Account(object):
                 result.raise_for_status()
                 account_info = result.json()
                 stored_info = {
-                    'id': account_info['uid'],
+                    'id': account_info['id'],
                     'name': account_info['name'],
-                    'roles': account_info['scopes'],
                     'legacy_id': None
                 }
                 json.dump(stored_info, f)

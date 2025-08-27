@@ -13,7 +13,7 @@ from libpebble2.communication.transports.websocket.protocol import (WebSocketPro
 from pebble_tool.account import get_default_account
 from pebble_tool.exceptions import ToolError
 
-CP_TRANSPORT_HOST = os.environ.get('CP_TRANSPORT_HOST', 'wss://dev-ws-proxy.rebble.io/tool')
+CP_TRANSPORT_HOST = os.environ.get('CP_TRANSPORT_HOST', 'wss://cloudpebble-proxy.repebble.com/tool')
 
 logger = logging.getLogger("pebble_tool.sdk.cloudpebble")
 
