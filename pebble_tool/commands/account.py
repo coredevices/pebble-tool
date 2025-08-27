@@ -12,11 +12,16 @@ class LogInCommand(BaseCommand):
     def __call__(self, args):
         super(LogInCommand, self).__call__(args)
         account = get_default_account()
-        account.login(args)
+        if hasattr(args, 'token') and args.token:
+            account.login_with_token(args.token)
+            print("Successfully logged in with provided token.")
+        else:
+            account.login(args)
 
     @classmethod
     def add_parser(cls, parser):
         parser = super(LogInCommand, cls).add_parser(parser)
+        parser.add_argument('--token', type=str, help='Access token to use for authentication instead of OAuth flow')
         parser.add_argument('--auth_host_name', type=str, default='localhost')
         parser.add_argument('--auth_host_port', type=int, nargs='?', default=[60000])
         parser.add_argument('--logging_level', type=str, default='ERROR')

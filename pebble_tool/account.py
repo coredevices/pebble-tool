@@ -10,6 +10,7 @@ from oauth2client.client import OAuth2WebServerFlow
 from oauth2client.client import Credentials
 from oauth2client.file import Storage
 import oauth2client.tools as tools
+from oauth2client.client import OAuth2Credentials
 
 from pebble_tool.util import get_persist_dir
 
@@ -99,6 +100,21 @@ class Account(object):
 
         self.storage.put(creds)
         self.user_info = self._get_user_info()
+
+    def login_with_token(self, access_token):
+        creds = OAuth2Credentials(
+            access_token=access_token,
+            client_id=SDK_CLIENT_ID,
+            client_secret=SDK_CLIENT_SECRET,
+            refresh_token=None,
+            token_expiry=None,
+            token_uri=TOKEN_URI,
+            user_agent=None
+        )
+        
+        creds = self._set_expiration_to_long_time(creds)
+        self.storage.put(creds)
+        self._user_info = self._get_user_info()
 
     def logout(self):
         self.storage.delete()
