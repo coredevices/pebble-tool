@@ -18,8 +18,8 @@ AUTHORIZE_URI = AUTH_SERVER + "/oauth/authorise"
 TOKEN_URI     = AUTH_SERVER + "/oauth/token"
 ME_URI        = AUTH_SERVER + "/api/v1/me"
 
-SDK_CLIENT_ID     = os.getenv("PEBBLE_OAUTH_APP_ID", "b576399e9d1fdaa8e666a4dffbbdd1")
-SDK_CLIENT_SECRET = os.getenv("PEBBLE_OAUTH_APP_SECRET", "DaJt7qHRAxmZ4E-ZTYWm4M04GKBZ363GZgPS0kdj3qg")
+SDK_CLIENT_ID     = os.getenv("PEBBLE_OAUTH_APP_ID", "Iv23likC9qHcKRPfqCRu")
+SDK_CLIENT_SECRET = os.getenv("PEBBLE_OAUTH_APP_SECRET", "f7a3280b328d14fae132c5f97b4f151f13936f4f")
 
 flow = OAuth2WebServerFlow(
     client_id=SDK_CLIENT_ID,
