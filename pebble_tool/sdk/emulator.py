@@ -209,6 +209,8 @@ class ManagedEmulatorTransport(WebsocketTransport):
                 print("Launching VNC...")
                 logger.info("Spawning websockify for VNC access.")
                 self._spawn_websockify()
+                # Pause to avoid Connection Refused error in GitHub Codespaces
+                time.sleep(1)
             else:
                 logger.info("websockify is already running.")
 
