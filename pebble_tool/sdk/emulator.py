@@ -476,4 +476,4 @@ class ManagedEmulatorTransport(WebsocketTransport):
         info = get_emulator_info(platform, version or sdk_manager.get_current_sdk())
         if info is None:
             return False
-        return cls._is_pid_running(info['pypkjs']['pid']) and cls._is_pid_running(info['pypkjs']['pid'])
+        return cls._is_pid_running(info['pypkjs']['pid']) and cls._is_pid_running(info['qemu']['pid'])
