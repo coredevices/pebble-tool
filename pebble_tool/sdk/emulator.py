@@ -29,6 +29,12 @@ from . import sdk_path, get_sdk_persist_dir, sdk_manager
 logger = logging.getLogger("pebble_tool.sdk.emulator")
 black_hole = open(os.devnull, 'w')
 
+def _to_text(data):
+    if data is None:
+        return ''
+    if isinstance(data, bytes):
+        return data.decode('utf-8', 'replace')
+    return str(data)
 
 def get_emulator_info_path():
     return os.path.join(tempfile.gettempdir(), 'pb-emulator.json')
@@ -301,9 +307,10 @@ class ManagedEmulatorTransport(WebsocketTransport):
         time.sleep(0.2)
         if process.poll() is not None:
             try:
-                subprocess.check_output(command, stderr=subprocess.STDOUT)
+                subprocess.check_output(command, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
             except subprocess.CalledProcessError as e:
-                raise MissingEmulatorError("Couldn't launch emulator:\n{}".format(e.output.decode('utf-8').strip()))
+                out = getattr(e, 'stdout', None) or getattr(e, 'output', None)
+                raise MissingEmulatorError("Couldn't launch emulator:\n{}".format(_to_text(out).strip()))
         self.qemu_pid = process.pid
         self._wait_for_qemu()
 
@@ -381,9 +388,10 @@ class ManagedEmulatorTransport(WebsocketTransport):
         time.sleep(0.5)
         if process.poll() is not None:
             try:
-                subprocess.check_output(command, stderr=subprocess.STDOUT)
+                subprocess.check_output(command, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
             except subprocess.CalledProcessError as e:
-                raise MissingEmulatorError("Couldn't launch websockify:\n{}".format(e.output.decode('utf-8').strip()))
+                out = getattr(e, 'stdout', None) or getattr(e, 'output', None)
+                raise MissingEmulatorError("Couldn't launch websockify:\n{}".format(_to_text(out).strip()))
         self.websockify_pid = process.pid
         logger.info("Websockify running on port 6080, proxying to VNC display :1")
 
@@ -410,9 +418,10 @@ class ManagedEmulatorTransport(WebsocketTransport):
         time.sleep(0.5)
         if process.poll() is not None:
             try:
-                subprocess.check_output(command, stderr=subprocess.STDOUT, text=True)
+                subprocess.check_output(command, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
             except subprocess.CalledProcessError as e:
-                raise MissingEmulatorError("Couldn't launch pypkjs:\n{}".format(e.output.decode('utf-8').strip()))
+                out = getattr(e, 'stdout', None) or getattr(e, 'output', None)
+                raise MissingEmulatorError("Couldn't launch pypkjs:\n{}".format(_to_text(out).strip()))
         self.pypkjs_pid = process.pid
 
     def _get_output(self):
