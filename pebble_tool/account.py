@@ -1,13 +1,16 @@
 
 
+import sys
 import httplib2
 import json
 import os
 import os.path
 import requests
 
+import webbrowser
 from oauth2client.client import OAuth2WebServerFlow
 from oauth2client.client import Credentials
+from oauth2client.client import FlowExchangeError
 from oauth2client.file import Storage
 import oauth2client.tools as tools
 from oauth2client.client import OAuth2Credentials
@@ -26,10 +29,39 @@ SDK_CLIENT_SECRET = os.getenv("PEBBLE_OAUTH_APP_SECRET", "f7a3280b328d14fae132c5
 flow = OAuth2WebServerFlow(
     client_id=SDK_CLIENT_ID,
     client_secret=SDK_CLIENT_SECRET,
+    redirect_uri="https://cloud.repebble.com/githubAuth",
     scope="profile",
     auth_uri=AUTHORIZE_URI,
     token_uri=TOKEN_URI
 )
+
+def _run_flow(flow, storage, flags):
+    httpd = tools.ClientRedirectServer(("localhost", 60000),
+                            tools.ClientRedirectHandler)
+    authorize_url = flow.step1_get_authorize_url()
+    webbrowser.open(authorize_url, new=1, autoraise=True)
+    print(f"Opened browser to visit:\n{authorize_url}")
+
+    code = None
+    httpd.handle_request()
+    if 'error' in httpd.query_params:
+        sys.exit('Authentication request was rejected.')
+    if 'code' in httpd.query_params:
+        code = httpd.query_params['code']
+    else:
+        print('Failed to find "code" in the query parameters '
+                'of the redirect.')
+
+    try:
+        credential = flow.step2_exchange(code)
+    except FlowExchangeError as e:
+        sys.exit('Authentication has failed: {0}'.format(e))
+
+    storage.put(credential)
+    credential.set_store(storage)
+    print('Authentication successful.')
+
+    return credential
 
 
 class Account(object):
@@ -96,7 +128,7 @@ class Account(object):
         return Credentials.new_from_json(cred_new_json)
 
     def login(self, args):
-        creds = self._set_expiration_to_long_time(tools.run_flow(flow, self.storage, args))
+        creds = self._set_expiration_to_long_time(_run_flow(flow, self.storage, args))
 
         self.storage.put(creds)
         self.user_info = self._get_user_info()
