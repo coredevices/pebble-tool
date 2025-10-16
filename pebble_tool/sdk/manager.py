@@ -22,7 +22,7 @@ from pebble_tool.util.config import config
 from pebble_tool.util.npm import invoke_npm
 from pebble_tool.util.versions import version_to_key
 
-pebble_platforms = ('aplite', 'basalt', 'chalk', 'diorite', 'emery')
+pebble_platforms = ('aplite', 'basalt', 'chalk', 'diorite', 'emery', 'flint')
 
 class SDKManager(object):
     DOWNLOAD_SERVER = "https://sdk.core.store"

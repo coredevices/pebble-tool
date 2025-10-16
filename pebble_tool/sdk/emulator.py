@@ -264,6 +264,11 @@ class ManagedEmulatorTransport(WebsocketTransport):
             command.extend(["-vnc", ":1"])
 
         platform_args = {
+            'flint': [
+                '-machine', 'pebble-silk-bb',
+                '-cpu', 'cortex-m4',
+                '-mtdblock', qemu_spi_flash,
+            ],
             'emery': [
                 '-machine', 'pebble-robert-bb',
                 '-cpu', 'cortex-m4',
