@@ -263,6 +263,13 @@ class ManagedEmulatorTransport(WebsocketTransport):
             command.extend(["-L", os.path.join(sdk_manager.root_path_for_sdk(self.version), 'toolchain', 'lib', 'pc-bios')])
             command.extend(["-vnc", ":1"])
 
+        # Determine the correct machine for emery based on SDK version
+        emery_machine = 'pebble-robert-bb'
+        if self.platform == 'emery':
+            from distutils.version import LooseVersion
+            if LooseVersion(self.version) >= LooseVersion('4.9'):
+                emery_machine = 'pebble-snowy-emery-bb'
+
         platform_args = {
             'flint': [
                 '-machine', 'pebble-silk-bb',
@@ -270,7 +277,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
                 '-mtdblock', qemu_spi_flash,
             ],
             'emery': [
-                '-machine', 'pebble-robert-bb',
+                '-machine', emery_machine,
                 '-cpu', 'cortex-m4',
                 '-pflash', qemu_spi_flash,
             ],
