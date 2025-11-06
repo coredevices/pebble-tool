@@ -1,6 +1,7 @@
 
 __author__ = 'katharine'
 
+import argparse
 import datetime
 import itertools
 import png
@@ -14,6 +15,19 @@ from libpebble2.services.screenshot import Screenshot
 
 from .base import PebbleCommand
 from pebble_tool.exceptions import ToolError
+
+
+def _positive_int(value):
+    """Validate that the value is a positive integer."""
+    try:
+        ivalue = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{value}' is not a valid integer")
+
+    if ivalue < 1:
+        raise argparse.ArgumentTypeError(f"'{value}' must be a positive integer (>= 1)")
+
+    return ivalue
 
 
 class ScreenshotCommand(PebbleCommand):
@@ -42,6 +56,8 @@ class ScreenshotCommand(PebbleCommand):
         if not args.no_correction:
             image = self._correct_colours(image)
         image = self._roundify(image)
+        if args.scale > 1:
+            image = self._scale_image(image, args.scale)
         self.progress_bar.finish()
 
         filename = self._generate_filename() if args.filename is None else args.filename
@@ -144,6 +160,46 @@ class ScreenshotCommand(PebbleCommand):
                         row[x] = 0
         return rgba
 
+    def _scale_image(self, image, scale):
+        """
+        Scale an RGBA image using nearest-neighbor interpolation.
+
+        Each pixel becomes an NxN block of identical pixels.
+
+        :param image: List of lists, where each inner list is a row of RGBA values
+        :param scale: Integer scale factor (2 = double size, 3 = triple size, etc.)
+        :return: Scaled image in the same format
+        """
+        if scale == 1:
+            return image
+
+        height = len(image)
+        width = len(image[0]) // 4  # Divide by 4 since each pixel is RGBA
+
+        scaled_image = []
+
+        # For each row in the original image
+        for row_idx in range(height):
+            # Each original row needs to be replicated 'scale' times
+            for _ in range(scale):
+                scaled_row = []
+                # For each pixel in the original row
+                for pixel_idx in range(width):
+                    # Get the RGBA values for this pixel
+                    base_idx = pixel_idx * 4
+                    r = image[row_idx][base_idx]
+                    g = image[row_idx][base_idx + 1]
+                    b = image[row_idx][base_idx + 2]
+                    a = image[row_idx][base_idx + 3]
+
+                    # Replicate this pixel 'scale' times horizontally
+                    for _ in range(scale):
+                        scaled_row.extend([r, g, b, a])
+
+                scaled_image.append(scaled_row)
+
+        return scaled_image
+
     @classmethod
     def _generate_filename(cls):
         return datetime.datetime.now().strftime("pebble_screenshot_%Y-%m-%d_%H-%M-%S.png")
@@ -159,4 +215,6 @@ class ScreenshotCommand(PebbleCommand):
         parser.add_argument('filename', nargs='?', type=str, help="Filename of screenshot")
         parser.add_argument('--no-correction', action="store_true", help="Disable colour correction.")
         parser.add_argument('--no-open', action="store_true", help="Disable automatic opening of image.")
+        parser.add_argument('--scale', type=_positive_int, default=1,
+                            help="Scale factor for the screenshot (must be a positive integer)")
         return parser
