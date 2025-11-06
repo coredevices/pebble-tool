@@ -29,7 +29,7 @@ pebble clean
 pebble install --emulator basalt
 
 # Screenshot the running emulator
-pebble screenshot --no-open screenshot.png
+pebble screenshot --scale 6 --no-open screenshot.png
 ```
 
 If you need more information on the `pebble` command or a sub-command, append `--help`.
@@ -80,7 +80,7 @@ Key Entry Points:
 
 ## Development Best Practices
 
-- Whenever making changes, run `pebble screenshot` and view the screenshot to make sure it's what the user requested. If not, make more changes until it does what it's supposed to.
+- Whenever making changes, run `pebble screenshot --scale 6` and view the screenshot to make sure it's what the user requested. If not, make more changes until it does what it's supposed to.
 
 ## AI Interaction Guidelines
 
