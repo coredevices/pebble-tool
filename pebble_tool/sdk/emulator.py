@@ -266,8 +266,10 @@ class ManagedEmulatorTransport(WebsocketTransport):
         # Determine the correct machine for emery based on SDK version
         emery_machine = 'pebble-robert-bb'
         if self.platform == 'emery':
-            from distutils.version import LooseVersion
-            if LooseVersion(self.version) >= LooseVersion('4.9'):
+            from packaging.version import parse as parse_version
+            # Strip any suffix for version comparison
+            version_base = self.version.split('-')[0]
+            if parse_version(version_base) >= parse_version('4.9'):
                 emery_machine = 'pebble-snowy-emery-bb'
 
         platform_args = {
