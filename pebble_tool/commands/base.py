@@ -296,12 +296,11 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
 
     @classmethod
     def add_argument_handler(cls, parser):
-        emu_group = parser.add_argument_group()
-        emu_group.add_argument('--emulator', type=str, help="Launch an emulator. Equivalent to PEBBLE_EMULATOR.",
+        parser.add_argument('--emulator', type=str, help="Launch an emulator. Equivalent to PEBBLE_EMULATOR.",
                            choices=pebble_platforms)
-        emu_group.add_argument('--sdk', type=str, help="SDK version to launch. Defaults to the active SDK"
+        parser.add_argument('--sdk', type=str, help="SDK version to launch. Defaults to the active SDK"
                                                    " (currently {})".format(sdk_version()))
-        emu_group.add_argument('--vnc', action='store_true', help="Enable VNC server for the emulator")
+        parser.add_argument('--vnc', action='store_true', help="Enable VNC server for the emulator")
 
 def register_children(parser):
     subparsers = parser.add_subparsers(title="command")
