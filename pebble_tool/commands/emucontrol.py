@@ -102,6 +102,27 @@ class EmuAppConfigCommand(PebbleCommand):
 
     def __call__(self, args):
         super(EmuAppConfigCommand, self).__call__(args)
+
+        # To use this command in a Github codespace, we need the user browser to reach the
+        # open port on his github codespace virtual machine instead of 'localhost' when user press
+        # the submit button, as this script will be listening from the codespace virtual machine.
+        #
+        # To achieve this, this command must be executed two steps :
+        #   - first step : with the '--config' option, this will return the opened port to the
+        # vscode extension so it can open and make that specific port public
+        #   - second step : with the '--codespace-name' and '--port' options, this will open the
+        # config page in the user's browser, but will transmit the new config to the open port
+        #
+        # WARNING: PORT MUST BE SET TO PUBLIC VISIBILITY
+        #
+        # This behavior is not necessary if tool is executed in local.
+        # If '--config', '--port' or '--codespace-name' are not provided, command will behave like normal.
+        browser = BrowserController()
+
+        if args.config:
+            print(f"port={browser.get_port()}")
+            return
+
         try:
             if isinstance(self.pebble.transport, ManagedEmulatorTransport):
                 self.pebble.transport.send_packet(WebSocketPhonesimAppConfig(config=AppConfigSetup()),
@@ -117,7 +138,10 @@ class EmuAppConfigCommand(PebbleCommand):
         else:
             config_url = response.config.data
 
-        browser = BrowserController()
+        if args.codespace_name:
+            browser.configure_codespace_name(args.codespace_name)
+            browser.configure_port(args.port)
+
         browser.open_config_page(config_url, self.handle_config_close)
 
     def handle_config_close(self, query):
@@ -132,6 +156,9 @@ class EmuAppConfigCommand(PebbleCommand):
     def add_parser(cls, parser):
         parser = super(EmuAppConfigCommand, cls).add_parser(parser)
         parser.add_argument('--file', help="Name of local file to use for settings page in lieu of URL specified in JS")
+        parser.add_argument('--config', action='store_true', help="Return the port that will be used before executing in a codespace.")
+        parser.add_argument('--codespace-name', help="Provide the Github codespace-name to build the correct return address, instead of using localhost")
+        parser.add_argument('--port', help="Use the specified port instead of creating one")
         return parser
 
 
