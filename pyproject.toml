@@ -4,11 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pebble-tool"
-version = "5.0.16"
+version = "5.0.17"
 description = "Tool for interacting with pebbles."
 readme = "README.md"
 license = "MIT"
-requires-python = "<=3.13"
 authors = [
     { name = "Core Devices LLC", email = "griffin@griffinli.com" },
 ]
