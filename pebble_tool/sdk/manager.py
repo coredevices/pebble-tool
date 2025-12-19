@@ -229,10 +229,10 @@ class SDKManager(object):
         By using the Pebble SDK, you agree to the following:
 
         PEBBLE TERMS OF USE
-        https://developer.rebble.io/developer.getpebble.com/legal/terms-of-use/index.html
+        https://developer.repebble.com/legal/terms-of-use/index.html
         
         PEBBLE DEVELOPER LICENSE
-        https://developer.rebble.io/developer.getpebble.com/legal/sdk-license/index.html
+        https://developer.repebble.com/legal/sdk-license/index.html
         """)
         print(prompt)
 
