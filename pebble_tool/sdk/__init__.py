@@ -5,7 +5,7 @@ import os
 
 from pebble_tool.exceptions import MissingSDK
 from pebble_tool.util import get_persist_dir
-from .manager import SDKManager, pebble_platforms
+from .manager import SDKManager, get_pebble_platforms
 
 SDK_VERSION = '3'
 

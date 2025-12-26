@@ -7,7 +7,7 @@ import shutil
 import signal
 
 from ..base import BaseCommand
-from pebble_tool.sdk import get_sdk_persist_dir, get_persist_dir, pebble_platforms
+from pebble_tool.sdk import get_sdk_persist_dir, get_persist_dir, get_pebble_platforms
 import pebble_tool.sdk.emulator as emulator
 
 
@@ -54,7 +54,7 @@ class WipeCommand(BaseCommand):
         if args.everything:
             shutil.rmtree(get_persist_dir())
         else:
-            for platform in pebble_platforms:
+            for platform in get_pebble_platforms():
                 shutil.rmtree(get_sdk_persist_dir(platform))
 
     @classmethod

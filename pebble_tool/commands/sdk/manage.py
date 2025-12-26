@@ -9,7 +9,7 @@ import shutil
 
 from ..base import BaseCommand
 from pebble_tool.exceptions import MissingSDK
-from pebble_tool.sdk import get_sdk_persist_dir, sdk_manager, pebble_platforms
+from pebble_tool.sdk import get_sdk_persist_dir, sdk_manager, get_pebble_platforms
 from pebble_tool.util.versions import version_to_key
 
 
@@ -113,7 +113,7 @@ class SDKManager(BaseCommand):
         print("Uninstalling SDK {}...".format(args.version))
         sdk_manager.uninstall_sdk(args.version)
         if not args.keep_data:
-            for platform in pebble_platforms:
+            for platform in get_pebble_platforms():
                 shutil.rmtree(os.path.join(get_sdk_persist_dir(platform, args.version)))
         print("Done.")
 

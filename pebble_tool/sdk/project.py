@@ -10,7 +10,7 @@ SDK_VERSION = "3"
 from pebble_tool.exceptions import (InvalidProjectException, InvalidJSONException, OutdatedProjectException,
                                     PebbleProjectException)
 from pebble_tool.sdk import sdk_version
-from . import pebble_platforms
+from . import get_pebble_platforms
 
 
 def PebbleProject(project_dir=None):
@@ -104,7 +104,7 @@ class AppinfoProject(PebbleProjectBase):
         self.company_name = self.appinfo['companyName']
         self.version = self.appinfo['versionLabel']
         self.sdk_version = self.appinfo.get('sdkVersion', 2)
-        self.target_platforms = self.appinfo.get('targetPlatforms', pebble_platforms)
+        self.target_platforms = self.appinfo.get('targetPlatforms', get_pebble_platforms())
         self.enable_multi_js = self.appinfo.get('enableMultiJS', False)
         self.capabilities = self.appinfo.get('capabilities', [])
         self.project_type = self.appinfo.get('projectType', 'native')
@@ -160,7 +160,7 @@ class NpmProject(PebbleProjectBase):
         self.company_name = self.project_info['author']
         self.version = self.project_info['version']
         self.sdk_version = self.appinfo.get('sdkVersion', 2)
-        self.target_platforms = self.appinfo.get('targetPlatforms', pebble_platforms)
+        self.target_platforms = self.appinfo.get('targetPlatforms', get_pebble_platforms())
         self.enable_multi_js = self.appinfo.get('enableMultiJS', False)
         self.capabilities = self.appinfo.get('capabilities', [])
         self.project_type = self.appinfo.get('projectType', 'native')

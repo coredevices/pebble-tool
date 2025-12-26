@@ -22,7 +22,30 @@ from pebble_tool.util.config import config
 from pebble_tool.util.npm import invoke_npm
 from pebble_tool.util.versions import version_to_key
 
-pebble_platforms = ('aplite', 'basalt', 'chalk', 'diorite', 'emery', 'flint')
+_FALLBACK_PLATFORMS = ('aplite', 'basalt', 'chalk', 'diorite', 'emery', 'flint')
+
+def get_pebble_platforms(sdk_path=None):
+    """Get platforms from the installed SDK, with fallback to hardcoded list."""
+    try:
+        if sdk_path is None:
+            from pebble_tool.sdk import sdk_path as get_sdk_path
+            sdk_path = get_sdk_path()
+
+        # Try standard SDK structure: <sdk-core>/pebble/common/tools/pebble_sdk_platform.py
+        platform_file = os.path.join(sdk_path, 'pebble', 'common', 'tools', 'pebble_sdk_platform.py')
+        # Also try tintin structure: <sdk>/common/tools/pebble_sdk_platform.py
+        if not os.path.exists(platform_file):
+            platform_file = os.path.join(sdk_path, 'common', 'tools', 'pebble_sdk_platform.py')
+
+        if os.path.exists(platform_file):
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("pebble_sdk_platform", platform_file)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return tuple(module.pebble_platforms.keys())
+    except Exception:
+        pass
+    return _FALLBACK_PLATFORMS
 
 class SDKManager(object):
     DOWNLOAD_SERVER = "https://sdk.core.store"
@@ -293,7 +316,7 @@ import sys
 subprocess.call([sys.executable, {}] + sys.argv[1:])
 """.format(repr(os.path.join(sdk_path, 'waf'))))
             os.chmod(os.path.join(pebble_path, 'waf'), 0o755)
-        for platform in pebble_platforms:
+        for platform in get_pebble_platforms(sdk_path):
             os.mkdir(os.path.join(pebble_path, platform))
             os.symlink(os.path.join(sdk_path, platform, 'include'), os.path.join(pebble_path, platform, 'include'))
             os.symlink(os.path.join(sdk_path, platform, 'lib'), os.path.join(pebble_path, platform, 'lib'))

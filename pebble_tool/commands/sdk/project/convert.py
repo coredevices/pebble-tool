@@ -10,7 +10,7 @@ from shutil import copy2
 from pebble_tool.commands.sdk.project import SDKProjectCommand
 from pebble_tool.exceptions import OutdatedProjectException, ToolError
 from pebble_tool.sdk.project import NpmProject
-from pebble_tool.sdk import pebble_platforms
+from pebble_tool.sdk import get_pebble_platforms
 
 
 class PblProjectConverter(SDKProjectCommand):
@@ -105,7 +105,7 @@ class PblProjectConverter(SDKProjectCommand):
         with open(app_info_path, "r") as f:
             app_info_json = json.load(f, object_pairs_hook=collections.OrderedDict)
 
-        app_info_json["targetPlatforms"] = pebble_platforms
+        app_info_json["targetPlatforms"] = list(get_pebble_platforms())
         app_info_json["sdkVersion"] = "3"
 
         with open(app_info_path, "w") as f:

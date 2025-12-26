@@ -15,7 +15,7 @@ from libpebble2.exceptions import ConnectionError
 from libpebble2.protocol.system import TimeMessage, SetUTC
 
 from pebble_tool.exceptions import ToolError
-from pebble_tool.sdk import pebble_platforms, sdk_version
+from pebble_tool.sdk import get_pebble_platforms, sdk_version
 from pebble_tool.sdk.emulator import ManagedEmulatorTransport, get_all_emulator_info
 from pebble_tool.sdk.cloudpebble import CloudPebbleTransport
 from pebble_tool.util.analytics import post_event
@@ -271,9 +271,9 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
             return emulator_platform, emulator_sdk, vnc_enabled
         elif 'PEBBLE_EMULATOR' in os.environ:
             emulator_platform = os.environ['PEBBLE_EMULATOR']
-            if emulator_platform not in pebble_platforms:
+            if emulator_platform not in get_pebble_platforms():
                 raise ToolError("PEBBLE_EMULATOR is set to '{}', which is not a valid platform "
-                                "(pick from {})".format(emulator_platform, ', '.join(pebble_platforms)))
+                                "(pick from {})".format(emulator_platform, ', '.join(get_pebble_platforms())))
             emulator_sdk = os.environ.get('PEBBLE_EMULATOR_VERSION', sdk_version())
         else:
             running = cls.get_running_emulators()
@@ -298,7 +298,7 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
     def add_argument_handler(cls, parser):
         emu_group = parser.add_argument_group()
         emu_group.add_argument('--emulator', type=str, help="Launch an emulator. Equivalent to PEBBLE_EMULATOR.",
-                           choices=pebble_platforms)
+                           choices=get_pebble_platforms())
         emu_group.add_argument('--sdk', type=str, help="SDK version to launch. Defaults to the active SDK"
                                                    " (currently {})".format(sdk_version()))
         emu_group.add_argument('--vnc', action='store_true', help="Enable VNC server for the emulator")
