@@ -28,8 +28,10 @@ def get_pebble_platforms(sdk_path=None):
     """Get platforms from the installed SDK, with fallback to hardcoded list."""
     try:
         if sdk_path is None:
-            from pebble_tool.sdk import sdk_path as get_sdk_path
-            sdk_path = get_sdk_path()
+            from pebble_tool.sdk import sdk_manager
+            sdk_path = sdk_manager.current_path
+            if sdk_path is None:
+                return _FALLBACK_PLATFORMS
 
         # Try standard SDK structure: <sdk-core>/pebble/common/tools/pebble_sdk_platform.py
         platform_file = os.path.join(sdk_path, 'pebble', 'common', 'tools', 'pebble_sdk_platform.py')
