@@ -1,7 +1,0 @@
-#!/bin/sh
-
-# This exists because our build system assumes that 'python' refers to a python 2
-# interpreter. On systems where 'python' means 'python3', we add this at the front
-# of the PATH so that when the build system invokes 'python', it gets 'python2'.
-
-python2 $@
