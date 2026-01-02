@@ -44,9 +44,6 @@ Homepage = "https://github.com/coredevices/pebble-tool"
 [tool.hatch.build.targets.wheel]
 packages = ["pebble_tool"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"pebble_tool/commands/sdk/python" = "pebble_tool/commands/sdk/python"
-
 [tool.hatch.build.targets.sdist]
 include = [
     "/pebble_tool",
