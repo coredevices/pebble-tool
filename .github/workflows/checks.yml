@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  release-build:
+  test-cov:
     runs-on: ubuntu-latest
 
     steps:
