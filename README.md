@@ -24,6 +24,12 @@ For developers of `pebble-tool`, use:
 uv run pebble.py
 ```
 
+## Testing
+Test coverage can be run locally with:
+```sh
+uv run pytest
+```
+
 ## Troubleshooting
 
 If you run into issues, try uninstalling and re-installing. You can remove the latest SDK with
