@@ -19,6 +19,11 @@ Instructions are at https://developer.repebble.com/sdk
 
 It's super simple: install a few platform-specific dependencies, then install pebble-tool via `uv`.
 
+For developers of `pebble-tool`, use:
+```sh
+uv run pebble.py
+```
+
 ## Troubleshooting
 
 If you run into issues, try uninstalling and re-installing. You can remove the latest SDK with
