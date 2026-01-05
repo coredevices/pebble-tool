@@ -202,7 +202,20 @@ class SDKManager(object):
             self.set_current_sdk(sdk_info['version'])
 
             platform_name = "mac" if platform.system() == "Darwin" else "linux"
-            self.install_toolchain_from_url(f"{self.DOWNLOAD_SERVER}/releases/{sdk_info['version']}/toolchain-{platform_name}.tar.gz", sdk_info['version'], platform_name)
+            arch = platform.machine()
+
+            # Try architecture-specific toolchain first, fall back to platform-only
+            arch_specific_url = f"{self.DOWNLOAD_SERVER}/releases/{sdk_info['version']}/toolchain-{platform_name}-{arch}.tar.gz"
+            fallback_url = f"{self.DOWNLOAD_SERVER}/releases/{sdk_info['version']}/toolchain-{platform_name}.tar.gz"
+
+            try:
+                response = requests.head(arch_specific_url)
+                if response.status_code == 200:
+                    self.install_toolchain_from_url(arch_specific_url, sdk_info['version'], f"{platform_name}-{arch}")
+                else:
+                    self.install_toolchain_from_url(fallback_url, sdk_info['version'], platform_name)
+            except requests.RequestException:
+                self.install_toolchain_from_url(fallback_url, sdk_info['version'], platform_name)
 
             print("Done.")
         except Exception:
