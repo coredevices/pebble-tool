@@ -2,6 +2,8 @@
 __author__ = 'cherie'
 
 import argparse
+import time
+
 from libpebble2.communication.transports.websocket import MessageTargetPhone
 from libpebble2.communication.transports.websocket.protocol import AppConfigCancelled, AppConfigResponse, AppConfigSetup
 from libpebble2.communication.transports.websocket.protocol import WebSocketPhonesimAppConfig
@@ -322,3 +324,63 @@ class EmuSetContentSizeCommand(PebbleCommand):
     def add_parser(cls, parser):
         parser = super(EmuSetContentSizeCommand, cls).add_parser(parser)
         parser.add_argument('size', choices=['small', 'medium', 'large', 'x-large'], help="Set the content size.")
+        return parser
+
+
+class EmuButtonCommand(PebbleCommand):
+    """Press buttons on the emulator."""
+    command = 'emu-button'
+    valid_connections = {'qemu', 'emulator'}
+
+    BUTTON_MAP = {
+        'back': QemuButton.Button.Back,
+        'up': QemuButton.Button.Up,
+        'select': QemuButton.Button.Select,
+        'down': QemuButton.Button.Down,
+    }
+
+    def __call__(self, args):
+        super(EmuButtonCommand, self).__call__(args)
+
+        # Handle 'release' action (no buttons needed)
+        if args.action == 'release':
+            send_data_to_qemu(self.pebble.transport, QemuButton(state=0))
+            return
+
+        # Validate buttons provided for click/push
+        if not args.buttons:
+            raise ToolError("At least one button required for '{}' action.".format(args.action))
+
+        # Validate button names and calculate bitmask
+        state = 0
+        for btn in args.buttons:
+            if btn not in self.BUTTON_MAP:
+                raise ToolError("Invalid button '{}'. Valid buttons: back, up, select, down".format(btn))
+            state |= self.BUTTON_MAP[btn]
+
+        # Execute action with optional repeat
+        for i in range(args.repeat):
+            if i > 0:
+                time.sleep(args.interval / 1000.0)
+
+            if args.action == 'push':
+                send_data_to_qemu(self.pebble.transport, QemuButton(state=state))
+            elif args.action == 'click':
+                send_data_to_qemu(self.pebble.transport, QemuButton(state=state))
+                time.sleep(args.duration / 1000.0)
+                send_data_to_qemu(self.pebble.transport, QemuButton(state=0))
+
+    @classmethod
+    def add_parser(cls, parser):
+        parser = super(EmuButtonCommand, cls).add_parser(parser)
+        parser.add_argument('action', choices=['click', 'push', 'release'],
+                            help="Action: click (press+release), push (hold down), release (let go)")
+        parser.add_argument('buttons', nargs='*', metavar='BUTTON',
+                            help="Button(s): back, up, select, down")
+        parser.add_argument('--duration', '-d', type=int, default=100,
+                            help="Duration in ms for click (default: 100)")
+        parser.add_argument('--repeat', '-n', type=int, default=1,
+                            help="Number of times to repeat (default: 1)")
+        parser.add_argument('--interval', '-i', type=int, default=200,
+                            help="Interval in ms between repeats (default: 200)")
+        return parser
