@@ -6,10 +6,11 @@ import os
 import subprocess
 import time
 
-from pebble_tool.exceptions import BuildError
+from pebble_tool.exceptions import BuildError, ToolError
 from pebble_tool.util.analytics import post_event
 import pebble_tool.util.npm as npm
 from pebble_tool.commands.sdk.project import SDKProjectCommand
+from pebble_tool.sdk import has_rocky_tools, sdk_version
 
 
 class BuildCommand(SDKProjectCommand):
@@ -19,6 +20,17 @@ class BuildCommand(SDKProjectCommand):
     def __call__(self, args):
         super(BuildCommand, self).__call__(args)
         start_time = time.time()
+        # Check if Rocky.js project has required SDK tools
+        if self.project.project_type == 'rocky':
+            if not has_rocky_tools():
+                raise ToolError(
+                    "This is a Rocky.js project, but the currently active SDK ({}) "
+                    "does not have Rocky.js tools installed.\n\n"
+                    "Rocky.js requires an SDK version that includes js_tooling.wasm.\n"
+                    "Try installing a different SDK version with 'pebble sdk install <version>'.".format(
+                        sdk_version() or "unknown"
+                    )
+                )
         if len(self.project.dependencies) > 0:
             post_event('app_build_with_npm_deps')
             try:

@@ -11,7 +11,7 @@ from uuid import uuid4
 from six import iteritems, string_types
 
 from . import SDKCommand
-from pebble_tool.sdk import SDK_VERSION, sdk_version
+from pebble_tool.sdk import SDK_VERSION, sdk_version, has_rocky_tools
 from pebble_tool.exceptions import ToolError
 from pebble_tool.util.analytics import post_event
 from pebble_tool.util.versions import version_to_key
@@ -140,6 +140,14 @@ class NewProjectCommand(SDKCommand):
         if args.rocky:
             if sdk2:
                 raise ToolError("--rocky is not compatible with SDK 2.9")
+            if not has_rocky_tools(sdk):
+                raise ToolError(
+                    "The currently active SDK ({}) does not support Rocky.js projects.\n\n"
+                    "Rocky.js requires an SDK version that includes js_tooling.wasm.\n"
+                    "Try installing a different SDK version with 'pebble sdk install <version>'.".format(
+                        sdk or "unknown"
+                    )
+                )
             if args.simple or args.worker:
                 raise ToolError("--rocky is incompatible with --simple and --worker")
             options = ['rocky']
