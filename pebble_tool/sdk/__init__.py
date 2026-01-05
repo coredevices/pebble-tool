@@ -49,9 +49,30 @@ def get_sdk_persist_dir(platform, for_sdk_version=None):
         os.makedirs(dir)
     return dir
 
+def has_moddable_tools(version=None):
+    """Check if the SDK has Moddable tools available."""
+    version = version or sdk_version()
+    if not version:
+        return False
+    moddable_tools_path = os.path.join(get_persist_dir(), "SDKs", version, "toolchain", "moddable-tools")
+    mcrun_path = os.path.join(moddable_tools_path, "mcrun")
+    return os.path.exists(mcrun_path)
+
+
 def add_tools_to_path():
     if sdk_version():
         os.environ['PATH'] = "{}:{}".format(os.path.join(get_persist_dir(), "SDKs", sdk_version(), "toolchain", "arm-none-eabi", "bin"), os.environ['PATH'])
+
+        # Create symlink from /tmp/pebble-sdk to persist directory
+        tmp_link = "/var/tmp/pebble-sdk"
+        target = get_persist_dir()
+        if not (os.path.islink(tmp_link) and os.readlink(tmp_link) == target):
+            if os.path.lexists(tmp_link):
+                os.unlink(tmp_link)
+            os.symlink(target, tmp_link)
+
+        os.environ['PATH'] = "{}:{}".format(os.path.join(tmp_link, "SDKs", sdk_version(), "toolchain", "moddable-tools"), os.environ['PATH'])
+        os.environ['MODDABLE'] = os.path.join(tmp_link, "SDKs", sdk_version(), "toolchain", "moddable")
         extra_path = os.environ.get('PEBBLE_EXTRA_PATH')
         if extra_path:
             os.environ['PATH'] = "{}:{}".format(extra_path, os.environ['PATH'])

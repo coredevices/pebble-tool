@@ -37,7 +37,7 @@ class PebbleProjectBase(object):
         Raises an InvalidProjectException or an OutdatedProjectException if everything isn't quite right.
         """
 
-        if self.project_type not in  ('native', 'package', 'rocky'):
+        if self.project_type not in  ('native', 'package', 'rocky', 'moddable'):
             if self.project_type == 'pebblejs':
                 raise InvalidProjectException("Pebble.js is not part of the pebble SDK, and so the SDK can't build it.\n"
                                               "Either use CloudPebble or follow the instructions at "

@@ -1,0 +1,33 @@
+{
+  "name": "${project_name}",
+  "author": "MakeAwesomeHappen",
+  "version": "1.0.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "${display_name}",
+    "uuid": "${uuid}",
+    "projectType": "moddable",
+    "sdkVersion": "${sdk_version}",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "emery"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "messageKeys": [
+      "dummy"
+    ],
+    "resources": {
+      "media": [
+		  {
+			"type": "raw",
+			"name": "MOD",
+			"file": "mods/mc.xsa"
+		  }
+	  ]
+    }
+  }
+}

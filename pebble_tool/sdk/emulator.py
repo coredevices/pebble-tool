@@ -260,7 +260,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
             "-rtc", "base=localtime",
             "-serial", "null",
             "-serial", "tcp::{},server,nowait".format(self.qemu_port),
-            "-serial", "tcp::{},server".format(self.qemu_serial_port),
+            "-serial", "tcp::{},server,nowait".format(self.qemu_serial_port),
             "-pflash", qemu_micro_flash,
             "-gdb", "tcp::{},server,nowait".format(self.qemu_gdb_port),
         ]

@@ -11,7 +11,7 @@ from libpebble2.exceptions import TimeoutError
 from libpebble2.services.install import AppInstaller
 
 from .base import PebbleCommand
-from ..util.logs import PebbleLogPrinter
+from ..util.logs import PebbleLogPrinter, QemuLogPrinter
 from ..exceptions import ToolError
 
 
@@ -29,14 +29,44 @@ class InstallCommand(PebbleCommand):
                                 "to install.")
             else:
                 raise ToolError(str(e))
+        
+        # Start log printers
+        log_printer = None
+        qemu_log_printer = None
+        
         if args.logs:
-            PebbleLogPrinter(self.pebble).wait()
+            log_printer = PebbleLogPrinter(self.pebble)
+        if args.qemu_logs:
+            qemu_log_printer = QemuLogPrinter(self.pebble)
+        
+        # If both are enabled, run them concurrently
+        if log_printer and qemu_log_printer:
+            import threading
+            
+            # Start QEMU log printer in background thread
+            qemu_thread = threading.Thread(target=qemu_log_printer.wait)
+            qemu_thread.daemon = True
+            qemu_thread.start()
+            
+            # Run app log printer in main thread (so Ctrl+C works properly)
+            try:
+                log_printer.wait()
+            except KeyboardInterrupt:
+                # Clean up both log printers
+                log_printer.stop()
+                qemu_log_printer.stop()
+                raise
+        elif log_printer:
+            log_printer.wait()
+        elif qemu_log_printer:
+            qemu_log_printer.wait()
 
     @classmethod
     def add_parser(cls, parser):
         parser = super(InstallCommand, cls).add_parser(parser)
         parser.add_argument('pbw', help="Path to app to install.", nargs='?', default=None)
         parser.add_argument('--logs', action="store_true", help="Enable logs")
+        parser.add_argument('--qemu_logs', action="store_true", help="Enable QEMU serial logs (emulator only)")
         return parser
 
 

@@ -11,7 +11,7 @@ from uuid import uuid4
 from six import iteritems, string_types
 
 from . import SDKCommand
-from pebble_tool.sdk import SDK_VERSION, sdk_version, has_rocky_tools
+from pebble_tool.sdk import SDK_VERSION, sdk_version, has_rocky_tools, has_moddable_tools
 from pebble_tool.exceptions import ToolError
 from pebble_tool.util.analytics import post_event
 from pebble_tool.util.versions import version_to_key
@@ -151,6 +151,11 @@ class NewProjectCommand(SDKCommand):
             if args.simple or args.worker:
                 raise ToolError("--rocky is incompatible with --simple and --worker")
             options = ['rocky']
+        elif args.alloy:
+            if not has_moddable_tools(sdk):
+                raise ToolError("The currently active SDK does not have Moddable tools. "
+                                "Please install an SDK with Moddable support to use --alloy.")
+            options = ['moddable']
         else:
             options = ['app']
             if args.javascript:
@@ -186,6 +191,7 @@ class NewProjectCommand(SDKCommand):
         exclusive_type_group = type_group.add_mutually_exclusive_group()
         exclusive_type_group.add_argument("--rocky", action="store_true", help="Create a Rocky.js project.")
         exclusive_type_group.add_argument("--c", action="store_true", help="Create a C project.")
+        exclusive_type_group.add_argument("--alloy", action="store_true", help="Create an Alloy project (powered by Moddable).")
         c_group = parser.add_argument_group('C-specific arguments')
         c_group.add_argument("--simple", action="store_true", help="Create a minimal C file.")
         c_group.add_argument("--javascript", action="store_true", help="Generate a JavaScript file.")

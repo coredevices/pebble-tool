@@ -10,6 +10,16 @@
             "package.json": "rocky/package.json"
         }
     },
+    "moddable": {
+        "default": {
+            "src/c/mdbl.c": "moddable/mdbl.c",
+            "src/embeddedjs/main.js": "moddable/main.js",
+            "src/embeddedjs/manifest.json": "moddable/manifest.json",
+            "src/pkjs/index.js": "moddable/index.js",
+            "package.json": "moddable/package.json",
+            "wscript": "moddable/wscript"
+        }
+    },
     "app": {
         "default": {
             "src/c/${project_name}.c": "app/main.c",

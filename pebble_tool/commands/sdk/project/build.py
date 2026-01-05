@@ -3,14 +3,16 @@ __author__ = 'katharine'
 
 import argparse
 import os
+import shutil
 import subprocess
+import sys
 import time
 
 from pebble_tool.exceptions import BuildError, ToolError
 from pebble_tool.util.analytics import post_event
 import pebble_tool.util.npm as npm
 from pebble_tool.commands.sdk.project import SDKProjectCommand
-from pebble_tool.sdk import has_rocky_tools, sdk_version
+from pebble_tool.sdk import has_rocky_tools, sdk_version, has_moddable_tools
 
 
 class BuildCommand(SDKProjectCommand):
@@ -48,6 +50,11 @@ class BuildCommand(SDKProjectCommand):
             extra_env = {}
             if args.debug:
                 extra_env = {'CFLAGS': os.environ.get('CFLAGS', '') + ' -O0'}
+            if self.project.project_type == 'moddable':
+                if not has_moddable_tools():
+                    raise ToolError("This is a Moddable project, but the currently active SDK does not have Moddable tools. "
+                                    "Please install an SDK with Moddable support to build this project.")
+                self.run_moddable_prebuild()
             self._waf("configure", extra_env=extra_env, args=waf)
             self._waf("build", args=waf)
         except subprocess.CalledProcessError:
@@ -58,6 +65,38 @@ class BuildCommand(SDKProjectCommand):
             duration = time.time() - start_time
             has_js = os.path.exists(os.path.join('src', 'js'))
             post_event("app_build_succeeded", has_js=has_js, line_counts=self._get_line_counts(), build_time=duration)
+
+    def run_moddable_prebuild(self):
+        print("Running Moddable prebuild.")
+        try:
+            os.makedirs('build', exist_ok=True)
+
+            cmd = [
+                'mcrun',
+                '-m', './src/embeddedjs/manifest.json',
+                '-f', 'x',
+                '-p', 'pebble',
+                '-t', 'build',
+                '-o', './build',
+                '-s', 'tech.moddable.pebble'
+            ]
+            print(f"Running {' '.join(cmd)}")
+            subprocess.run(cmd, check=True)
+
+            os.makedirs('resources/mods', exist_ok=True)
+
+            platform_dir = 'pebble'
+            src = f'build/bin/{platform_dir}/release/embeddedjs/mc.xsa'
+            dst = './resources/mods/mc.xsa'
+            shutil.copy2(src, dst)
+
+            print("Moddable prebuild completed.")
+        except subprocess.CalledProcessError as e:
+            print(f"Moddable prebuild failed: {e}")
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error in Moddable prebuild: {e}")
+            sys.exit(1)
 
     @classmethod
     def _get_line_counts(cls):
