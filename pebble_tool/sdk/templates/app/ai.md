@@ -82,6 +82,37 @@ Key Entry Points:
 
 - Whenever making changes, run `pebble screenshot --scale 6` and view the screenshot to make sure it's what the user requested. If not, make more changes until it does what it's supposed to.
 
+## Emulator Button Control
+
+Control emulator buttons programmatically with `pebble emu-button`:
+
+```bash
+# Click a button (press and release)
+pebble emu-button click select
+
+# Long press (e.g., 2 seconds to exit app)
+pebble emu-button click back --duration 2000
+
+# Repeat clicks (e.g., scroll down 5 times)
+pebble emu-button click down --repeat 5
+
+# Faster repeat interval
+pebble emu-button click up --repeat 3 --interval 100
+```
+
+**Actions:**
+- `click` - Press then release (use `--duration` for long press)
+- `push` - Hold button down (use `release` to let go)
+- `release` - Release all buttons
+
+**Buttons:** `back`, `up`, `select`, `down`
+
+**Best Practices:**
+- Use `click` for normal navigation and selection
+- Use `click --duration 2000` for long press (e.g., back button to exit)
+- Use `--repeat` to scroll through menus instead of multiple commands
+- After making UI changes, take a screenshot to verify the result
+
 ## AI Interaction Guidelines
 
 - When given an image of a watchface to replicate, describe the target watchface in precise detail. Note every visual element present, as well as size, alignment, font weight, spacing, and location.
