@@ -34,6 +34,18 @@ pebble screenshot --scale 6 --no-open screenshot.png
 
 If you need more information on the `pebble` command or a sub-command, append `--help`.
 
+### Headless Environments
+
+If you're running in an environment without a window server (e.g., headless Linux, Docker, CI), you must add `--vnc` to **all commands that interact with the emulator**. This includes app installs, screenshots, button presses, and any `emu-*` commands:
+
+```bash
+pebble install --emulator basalt --vnc
+pebble screenshot --vnc --scale 6 --no-open screenshot.png
+pebble emu-button --emulator basalt --vnc click select
+```
+
+The `--vnc` flag enables a VNC-based display backend that doesn't require X11.
+
 ## Project Structure
 
 ```
