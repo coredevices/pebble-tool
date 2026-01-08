@@ -71,24 +71,18 @@ class BuildCommand(SDKProjectCommand):
         try:
             os.makedirs('build', exist_ok=True)
 
-            cmd = [
-                'mcrun',
-                '-m', './src/embeddedjs/manifest.json',
-                '-f', 'x',
-                '-p', 'pebble',
-                '-t', 'build',
-                '-o', './build',
-                '-s', 'tech.moddable.pebble'
-            ]
-            print(f"Running {' '.join(cmd)}")
-            subprocess.run(cmd, check=True)
-
-            os.makedirs('resources/mods', exist_ok=True)
-
-            platform_dir = 'pebble'
-            src = f'build/bin/{platform_dir}/release/embeddedjs/mc.xsa'
-            dst = './resources/mods/mc.xsa'
-            shutil.copy2(src, dst)
+            for platform in self.project.target_platforms:
+                cmd = [
+                    'mcrun',
+                    '-m', './src/embeddedjs/manifest.json',
+                    '-f', 'x',
+                    '-p', f'pebble/{platform}',
+                    '-t', 'build',
+                    '-o', './build',
+                    '-s', 'tech.moddable.pebble'
+                ]
+                print(f"Running {' '.join(cmd)}")
+                subprocess.run(cmd, check=True)
 
             print("Moddable prebuild completed.")
         except subprocess.CalledProcessError as e:
