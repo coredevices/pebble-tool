@@ -4,7 +4,6 @@
 # Feel free to customize this to your needs.
 #
 import os.path
-import shutil
 
 top = '.'
 out = 'build'
@@ -34,14 +33,6 @@ def build(ctx):
     for platform in ctx.env.TARGET_PLATFORMS:
         ctx.env = ctx.all_envs[platform]
         ctx.set_group(ctx.env.PLATFORM_NAME)
-
-        # Copy platform-specific Moddable mod
-        mod_src = 'build/bin/pebble/{}/release/embeddedjs/mc.xsa'.format(platform)
-        mod_dst = 'resources/mods/mc.xsa'
-        if os.path.exists(mod_src):
-            os.makedirs('resources/mods', exist_ok=True)
-            shutil.copy2(mod_src, mod_dst)
-
         app_elf = '{}/pebble-app.elf'.format(ctx.env.BUILD_DIR)
         ctx.pbl_build(source=ctx.path.ant_glob('src/c/**/*.c'), target=app_elf, bin_type='app')
 

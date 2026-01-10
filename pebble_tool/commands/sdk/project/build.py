@@ -72,17 +72,25 @@ class BuildCommand(SDKProjectCommand):
             os.makedirs('build', exist_ok=True)
 
             for platform in self.project.target_platforms:
+                mcrun_output_dir = f'./build/mods/{platform}/mcrun'
+                os.makedirs(mcrun_output_dir, exist_ok=True)
                 cmd = [
                     'mcrun',
                     '-m', './src/embeddedjs/manifest.json',
                     '-f', 'x',
                     '-p', f'pebble/{platform}',
                     '-t', 'build',
-                    '-o', './build',
+                    '-o', mcrun_output_dir,
                     '-s', 'tech.moddable.pebble'
                 ]
                 print(f"Running {' '.join(cmd)}")
                 subprocess.run(cmd, check=True)
+
+                # Copy mc.xsa to where the SDK expects it
+                src = f'{mcrun_output_dir}/bin/pebble/release/embeddedjs/mc.xsa'
+                dst = f'build/mods/{platform}/mc.xsa'
+                shutil.copy2(src, dst)
+                print(f"Copied Moddable mod for {platform}")
 
             print("Moddable prebuild completed.")
         except subprocess.CalledProcessError as e:
