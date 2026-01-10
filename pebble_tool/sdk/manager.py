@@ -163,7 +163,7 @@ class SDKManager(object):
             self._install_toolchain_from_handle(f, sdk_version, platform_name)
 
     def install_from_path(self, path):
-        with open(path) as f:
+        with open(path, 'rb') as f:
             self._install_from_handle(f)
 
     def _install_from_handle(self, f):
