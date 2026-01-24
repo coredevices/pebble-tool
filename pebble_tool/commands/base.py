@@ -16,7 +16,7 @@ from libpebble2.protocol.system import TimeMessage, SetUTC
 
 from pebble_tool.exceptions import ToolError
 from pebble_tool.sdk import get_pebble_platforms, sdk_version
-from pebble_tool.sdk.emulator import ManagedEmulatorTransport, get_all_emulator_info
+from pebble_tool.sdk.emulator import ManagedEmulatorTransport, ExternalQemuTransport, get_all_emulator_info
 from pebble_tool.sdk.cloudpebble import CloudPebbleTransport
 from pebble_tool.util.analytics import post_event
 
@@ -213,6 +213,7 @@ class PebbleTransportPhone(PebbleTransportConfiguration):
 class PebbleTransportQemu(PebbleTransportConfiguration):
     transport_class = QemuTransport
     name = 'qemu'
+    _using_pypkjs = False
 
     @classmethod
     def _connect_args(cls, args):
@@ -227,10 +228,38 @@ class PebbleTransportQemu(PebbleTransportConfiguration):
         return (ip, port,)
 
     @classmethod
+    def get_transport(cls, args):
+        ip, port = cls._connect_args(args)
+        if getattr(args, 'pypkjs', False):
+            platform = getattr(args, 'platform', None)
+            if not platform:
+                raise ToolError("--pypkjs requires --platform <platform> to be specified")
+            sdk_version = getattr(args, 'sdk', None)
+            cls._using_pypkjs = True
+            return ExternalQemuTransport(ip, port, platform, sdk_version)
+        cls._using_pypkjs = False
+        return cls.transport_class(ip, port)
+
+    @classmethod
+    def post_connect(cls, connection):
+        # Set timezone when using pypkjs (same as emulator transport)
+        if cls._using_pypkjs and connection.firmware_version.major >= 3:
+            ts = time.time()
+            tz_offset = -time.altzone if time.localtime(ts).tm_isdst and time.daylight else -time.timezone
+            tz_offset_minutes = tz_offset // 60
+            tz_name = "UTC%+d" % (tz_offset_minutes / 60)
+            connection.send_packet(TimeMessage(message=SetUTC(unix_time=int(ts), utc_offset=tz_offset_minutes, tz_name=tz_name)))
+
+    @classmethod
     def add_argument_handler(cls, parser):
-        parser.add_argument('--qemu', nargs='?', const='localhost:12344', metavar='host',
+        qemu_group = parser.add_argument_group()
+        qemu_group.add_argument('--qemu', nargs='?', const='localhost:12344', metavar='host',
                             help="Use this option to connect directly to a QEMU instance. "
                                  "Equivalent to PEBBLE_QEMU.")
+        qemu_group.add_argument('--pypkjs', action='store_true',
+                            help="When using --qemu, also spawn pypkjs. Requires --platform.")
+        qemu_group.add_argument('--platform', type=str, choices=get_pebble_platforms(),
+                            help="Platform for pypkjs when using --qemu --pypkjs.")
 
 
 class PebbleTransportCloudPebble(PebbleTransportConfiguration):

@@ -491,3 +491,112 @@ class ManagedEmulatorTransport(WebsocketTransport):
         if info is None:
             return False
         return cls._is_pid_running(info['pypkjs']['pid']) and cls._is_pid_running(info['qemu']['pid'])
+
+
+class ExternalQemuTransport(WebsocketTransport):
+    """Transport that connects to an external QEMU instance and spawns pypkjs."""
+
+    def __init__(self, qemu_host, qemu_port, platform, version=None):
+        self.qemu_host = qemu_host
+        self.qemu_port = qemu_port
+        self.platform = platform
+        self.version = version
+        self.pypkjs_pid = None
+        self.pypkjs_port = self._choose_port()
+        super(ExternalQemuTransport, self).__init__('ws://localhost:{}/'.format(self.pypkjs_port))
+
+    def connect(self):
+        self._spawn_pypkjs()
+        for i in range(10):
+            time.sleep(0.5)
+            try:
+                super(ExternalQemuTransport, self).connect()
+            except (ConnectionError, OSError) as e:
+                logger.debug("Connection attempt %d failed: %s", i + 1, e)
+                continue
+            else:
+                return
+        super(ExternalQemuTransport, self).connect()
+
+    def _kill_existing_pypkjs(self):
+        """Kill any existing pypkjs processes connected to the target QEMU."""
+        try:
+            # Use lsof to find processes connected to the QEMU port
+            result = subprocess.run(
+                ['lsof', '-i', ':{}'.format(self.qemu_port), '-t'],
+                capture_output=True, text=True
+            )
+            if result.returncode != 0 or not result.stdout.strip():
+                return
+
+            pids = result.stdout.strip().split('\n')
+            for pid in pids:
+                pid = pid.strip()
+                if not pid:
+                    continue
+                try:
+                    # Check if this is a python process running pypkjs
+                    cmdline_result = subprocess.run(
+                        ['ps', '-p', pid, '-o', 'command='],
+                        capture_output=True, text=True
+                    )
+                    cmdline = cmdline_result.stdout.strip()
+                    if 'pypkjs' in cmdline:
+                        logger.info("Killing existing pypkjs process (pid %s)", pid)
+                        os.kill(int(pid), signal.SIGKILL)
+                        time.sleep(0.2)
+                except (ValueError, OSError) as e:
+                    logger.debug("Failed to check/kill pid %s: %s", pid, e)
+        except Exception as e:
+            logger.debug("Failed to check for existing pypkjs: %s", e)
+
+    def _spawn_pypkjs(self):
+        if self.version is None:
+            sdk_path()  # Force an SDK to be installed.
+            self.version = sdk_manager.get_current_sdk()
+
+        # Kill any existing pypkjs connected to this QEMU
+        self._kill_existing_pypkjs()
+
+        layout_file = os.path.join(sdk_manager.path_for_sdk(self.version), 'pebble', self.platform, 'qemu',
+                                   "layouts.json")
+
+        command = [
+            sys.executable, "-m", "pypkjs",
+            "--qemu", "{}:{}".format(self.qemu_host, self.qemu_port),
+            "--port", str(self.pypkjs_port),
+            "--persist", get_sdk_persist_dir(self.platform, self.version),
+            "--layout", layout_file,
+            '--debug',
+        ]
+
+        account = get_default_account()
+        if account.is_logged_in:
+            command.extend(['--oauth', account.bearer_token])
+        if logger.getEffectiveLevel() <= logging.DEBUG:
+            command.append('--debug')
+        logger.info("pypkjs command: %s", subprocess.list2cmdline(command))
+        process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output())
+        time.sleep(0.5)
+        if process.poll() is not None:
+            try:
+                subprocess.check_output(command, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
+            except subprocess.CalledProcessError as e:
+                out = getattr(e, 'stdout', None) or getattr(e, 'output', None)
+                raise MissingEmulatorError("Couldn't launch pypkjs:\n{}".format(_to_text(out).strip()))
+        self.pypkjs_pid = process.pid
+        logger.info("pypkjs spawned with pid %d, listening on port %d", self.pypkjs_pid, self.pypkjs_port)
+
+    def _get_output(self):
+        if logger.getEffectiveLevel() <= logging.DEBUG:
+            return None
+        else:
+            return black_hole
+
+    @classmethod
+    def _choose_port(cls):
+        sock = socket.socket()
+        sock.bind(('', 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        return port
