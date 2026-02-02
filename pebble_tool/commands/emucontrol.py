@@ -104,6 +104,16 @@ class EmuAppConfigCommand(PebbleCommand):
 
     def __call__(self, args):
         super(EmuAppConfigCommand, self).__call__(args)
+
+        # To use this command in a Github codespace, we need the user browser to reach the
+        # open port on his github codespace virtual machine instead of 'localhost' when user press
+        # the submit button, as this script will be listening from the codespace virtual machine.
+        #
+        # To achieve this, must be provided the following arguments:
+        #   - '--address {addres}': address to use when sending config data, instead of 'localhost'
+        #   - '--port {port}': port to use to retrieve config data
+        browser = BrowserController()
+
         try:
             if isinstance(self.pebble.transport, ManagedEmulatorTransport):
                 self.pebble.transport.send_packet(WebSocketPhonesimAppConfig(config=AppConfigSetup()),
@@ -119,7 +129,12 @@ class EmuAppConfigCommand(PebbleCommand):
         else:
             config_url = response.config.data
 
-        browser = BrowserController()
+        if args.address:
+            browser.configure_address(args.address)
+
+        if args.port:
+            browser.configure_port(args.port)
+
         browser.open_config_page(config_url, self.handle_config_close)
 
     def handle_config_close(self, query):
@@ -134,6 +149,8 @@ class EmuAppConfigCommand(PebbleCommand):
     def add_parser(cls, parser):
         parser = super(EmuAppConfigCommand, cls).add_parser(parser)
         parser.add_argument('--file', help="Name of local file to use for settings page in lieu of URL specified in JS")
+        parser.add_argument('--address', help="Provide the return address, instead of using localhost")
+        parser.add_argument('--port', help="Use the specified port instead of creating one")
         return parser
 
 
