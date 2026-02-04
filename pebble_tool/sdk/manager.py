@@ -218,7 +218,7 @@ class SDKManager(object):
                 self.install_toolchain_from_url(fallback_url, sdk_info['version'], platform_name)
 
             print("Done.")
-        except Exception:
+        except BaseException:
             print("Failed.")
             try:
                 if path is not None and os.path.exists(path):
@@ -255,8 +255,26 @@ class SDKManager(object):
         if 'version' not in sdk_info:
             raise SDKInstallError("SDK {} could not be downloaded.".format(version))
         path = os.path.normpath(os.path.join(self.sdk_dir, sdk_info['version']))
+        manifest_path = os.path.join(path, 'sdk-core', 'manifest.json')
+
+        # Check if SDK is already installed by validating the manifest
         if os.path.exists(path):
-            raise SDKInstallError("SDK {} is already installed.".format(sdk_info['version']))
+            if os.path.exists(manifest_path):
+                try:
+                    with open(manifest_path) as f:
+                        json.load(f)
+                    raise SDKInstallError("SDK {} is already installed.".format(sdk_info['version']))
+                except (ValueError, IOError):
+                    # Manifest is invalid or unreadable, clean up broken install
+                    print("Detected broken installation, cleaning up...")
+                    shutil.rmtree(path)
+                    print("Cleaned up broken installation.")
+            else:
+                # Directory exists but no manifest, clean up broken install
+                print("Detected broken installation, cleaning up...")
+                shutil.rmtree(path)
+                print("Cleaned up broken installation.")
+
         # For now, we ignore this field aside from bailing if it has content.
         Requirements(sdk_info['requirements']).ensure_satisfied()
         self._license_prompt()
