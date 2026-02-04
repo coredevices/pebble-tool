@@ -112,4 +112,4 @@ def _do_updates():
             latest_sdk = "0"
         _checkers.append(UpdateChecker("sdk-core", latest_sdk, _handle_sdk_update))
 
-_do_updates()
+# _do_updates()  # Update check disabled
