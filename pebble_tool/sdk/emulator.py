@@ -318,15 +318,25 @@ class ManagedEmulatorTransport(WebsocketTransport):
 
         command.extend(platform_args[self.platform])
 
-        # Dylibs for Apple Silicon Macs
-        os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = os.path.join(sdk_manager.root_path_for_sdk(self.version), 'toolchain', 'lib')
+        # Prepare environment with bundled dylibs for macOS
+        env = os.environ.copy()
+        if platform.system() == 'Darwin':
+            toolchain_lib_path = os.path.join(sdk_manager.root_path_for_sdk(self.version), 'toolchain', 'lib')
+            # Use DYLD_LIBRARY_PATH (not DYLD_FALLBACK_LIBRARY_PATH) to ensure bundled libraries
+            # take precedence over system libraries like Homebrew's glib
+            existing_dyld_path = env.get('DYLD_LIBRARY_PATH', '')
+            if existing_dyld_path:
+                env['DYLD_LIBRARY_PATH'] = toolchain_lib_path + ':' + existing_dyld_path
+            else:
+                env['DYLD_LIBRARY_PATH'] = toolchain_lib_path
+            logger.debug("Set DYLD_LIBRARY_PATH=%s", env['DYLD_LIBRARY_PATH'])
 
         logger.info("Qemu command: %s", subprocess.list2cmdline(command))
-        process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output())
+        process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output(), env=env)
         time.sleep(0.2)
         if process.poll() is not None:
             try:
-                subprocess.check_output(command, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
+                subprocess.check_output(command, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', env=env)
             except subprocess.CalledProcessError as e:
                 out = getattr(e, 'stdout', None) or getattr(e, 'output', None)
                 raise MissingEmulatorError("Couldn't launch emulator:\n{}".format(_to_text(out).strip()))
