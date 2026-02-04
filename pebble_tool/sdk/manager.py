@@ -22,7 +22,7 @@ from pebble_tool.util.config import config
 from pebble_tool.util.npm import invoke_npm
 from pebble_tool.util.versions import version_to_key
 
-_FALLBACK_PLATFORMS = ('aplite', 'basalt', 'chalk', 'diorite', 'emery', 'flint')
+_FALLBACK_PLATFORMS = ('aplite', 'basalt', 'chalk', 'diorite', 'emery', 'flint', 'gabbro')
 
 def get_pebble_platforms(sdk_path=None):
     """Get platforms from the installed SDK, with fallback to hardcoded list."""
