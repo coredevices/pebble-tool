@@ -279,6 +279,11 @@ class ManagedEmulatorTransport(WebsocketTransport):
                 emery_machine = 'pebble-snowy-emery-bb'
 
         platform_args = {
+            'gabbro': [
+                '-machine', 'pebble-spalding-gabbro-bb',
+                '-cpu', 'cortex-m4',
+                '-pflash', qemu_spi_flash,
+            ],
             'flint': [
                 '-machine', 'pebble-silk-bb',
                 '-cpu', 'cortex-m4',
