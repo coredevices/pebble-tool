@@ -12,7 +12,10 @@
       "aplite",
       "basalt",
       "chalk",
-      "diorite"
+      "diorite",
+      "emery",
+      "flint",
+      "gabbro"
     ],
     "resources": {
       "media": []
