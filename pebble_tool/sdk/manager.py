@@ -50,7 +50,7 @@ def get_pebble_platforms(sdk_path=None):
     return _FALLBACK_PLATFORMS
 
 class SDKManager(object):
-    DOWNLOAD_SERVER = "https://sdk.core.store"
+    DOWNLOAD_SERVER = "https://sdk.repebble.com"
 
     def __init__(self, sdk_dir=None):
         self.sdk_dir = os.path.normpath(sdk_dir or os.path.join(get_persist_dir(), "SDKs"))
