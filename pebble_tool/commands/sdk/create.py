@@ -73,7 +73,7 @@ def _copy_from_template(template, template_root, path, options):
         raise
 
     def substitute(template_content):
-        return Template(template_content).substitute(uuid=str(uuid),
+        return Template(template_content).safe_substitute(uuid=str(uuid),
                                                      project_name=project_name,
                                                      display_name=project_name,
                                                      project_name_c=re.sub(r'[^a-zA-Z0-9_]+', '_', project_name),
