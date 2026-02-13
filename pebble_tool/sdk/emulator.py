@@ -92,6 +92,32 @@ def update_emulator_info(platform, version, new_content):
         json.dump(content, f, indent=4)
 
 
+def ensure_qemu_for_bridge(platform, version=None, vnc_enabled=False):
+    """Ensure QEMU emulator is running and return connection info.
+
+    Returns (qemu_port, qemu_serial_port, version).
+    Only manages QEMU lifecycle, not pypkjs. Used by the libpebble3 bridge
+    which communicates directly with QEMU over TCP.
+    """
+    transport = ManagedEmulatorTransport(platform, version, vnc_enabled)
+
+    if transport.version is None:
+        sdk_path()
+        transport.version = sdk_manager.get_current_sdk()
+
+    if transport.qemu_pid is None:
+        logger.info("Spawning QEMU for libpebble3 bridge.")
+        transport._spawn_qemu()
+
+    if vnc_enabled and transport.websockify_pid is None:
+        transport._spawn_websockify()
+        time.sleep(1)
+
+    transport._save_state()
+
+    return transport.qemu_port, transport.qemu_serial_port, transport.version
+
+
 class ManagedEmulatorTransport(WebsocketTransport):
     def __init__(self, platform, version=None, vnc_enabled=False):
         self.platform = platform
@@ -268,6 +294,9 @@ class ManagedEmulatorTransport(WebsocketTransport):
         if self.vnc_enabled:
             command.extend(["-L", os.path.join(sdk_manager.root_path_for_sdk(self.version), 'toolchain', 'lib', 'pc-bios')])
             command.extend(["-vnc", ":1"])
+        elif not os.environ.get('DISPLAY'):
+            # No display available - run headless
+            command.append("-nographic")
 
         # Determine the correct machine for emery based on SDK version
         emery_machine = 'pebble-robert-bb'
@@ -469,6 +498,8 @@ class ManagedEmulatorTransport(WebsocketTransport):
 
     @classmethod
     def _is_pid_running(cls, pid):
+        if pid is None:
+            return False
         # PBL-21228: This isn't going to work on Windows.
         try:
             os.kill(pid, 0)
@@ -505,7 +536,10 @@ class ManagedEmulatorTransport(WebsocketTransport):
         info = get_emulator_info(platform, version or sdk_manager.get_current_sdk())
         if info is None:
             return False
-        return cls._is_pid_running(info['pypkjs']['pid']) and cls._is_pid_running(info['qemu']['pid'])
+        # QEMU must be running; pypkjs is optional (not needed when using libpebble3 bridge)
+        qemu_alive = cls._is_pid_running(info.get('qemu', {}).get('pid'))
+        pypkjs_alive = cls._is_pid_running(info.get('pypkjs', {}).get('pid'))
+        return qemu_alive and (pypkjs_alive or info.get('pypkjs', {}).get('pid') is None)
 
 
 class ExternalQemuTransport(WebsocketTransport):

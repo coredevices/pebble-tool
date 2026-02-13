@@ -10,7 +10,7 @@ from libpebble2.communication.transports.websocket.protocol import WebSocketInst
 from libpebble2.exceptions import TimeoutError
 from libpebble2.services.install import AppInstaller
 
-from .base import PebbleCommand
+from .base import PebbleCommand, BaseCommand
 from ..util.logs import PebbleLogPrinter, QemuLogPrinter
 from ..exceptions import ToolError
 
@@ -20,6 +20,13 @@ class InstallCommand(PebbleCommand):
     command = 'install'
 
     def __call__(self, args):
+        emulator_platform = getattr(args, 'emulator', None)
+        if emulator_platform:
+            # Use libpebble3 bridge for emulator (bypasses pypkjs/libpebble2)
+            BaseCommand.__call__(self, args)
+            self._install_via_bridge(args)
+            return
+
         super(InstallCommand, self).__call__(args)
         try:
             ToolAppInstaller(self.pebble, args.pbw).install()
@@ -29,25 +36,25 @@ class InstallCommand(PebbleCommand):
                                 "to install.")
             else:
                 raise ToolError(str(e))
-        
+
         # Start log printers
         log_printer = None
         qemu_log_printer = None
-        
+
         if args.logs:
             log_printer = PebbleLogPrinter(self.pebble)
         if args.qemu_logs:
             qemu_log_printer = QemuLogPrinter(self.pebble)
-        
+
         # If both are enabled, run them concurrently
         if log_printer and qemu_log_printer:
             import threading
-            
+
             # Start QEMU log printer in background thread
             qemu_thread = threading.Thread(target=qemu_log_printer.wait)
             qemu_thread.daemon = True
             qemu_thread.start()
-            
+
             # Run app log printer in main thread (so Ctrl+C works properly)
             try:
                 log_printer.wait()
@@ -60,6 +67,36 @@ class InstallCommand(PebbleCommand):
             log_printer.wait()
         elif qemu_log_printer:
             qemu_log_printer.wait()
+
+    def _install_via_bridge(self, args):
+        """Install app using libpebble3 bridge (direct QEMU TCP, no pypkjs)."""
+        from pebble_tool.sdk.emulator import ensure_qemu_for_bridge
+        from pebble_tool.bridge import run_bridge
+
+        platform = args.emulator
+        version = getattr(args, 'sdk', None)
+        vnc_enabled = getattr(args, 'vnc', False)
+
+        qemu_port, qemu_serial_port, version = ensure_qemu_for_bridge(
+            platform, version, vnc_enabled
+        )
+
+        pbw = args.pbw or 'build/{}.pbw'.format(os.path.basename(os.getcwd()))
+        pbw = os.path.abspath(pbw)
+
+        if not os.path.exists(pbw):
+            raise ToolError("PBW file not found: {}".format(pbw))
+
+        if args.logs:
+            command = 'install-and-logs'
+        else:
+            command = 'install'
+
+        print("Installing via libpebble3 bridge (QEMU port {})...".format(qemu_port))
+        rc = run_bridge(command, qemu_port, pbw_path=pbw, platform=platform)
+
+        if rc != 0:
+            raise ToolError("Bridge install failed (exit code {}).".format(rc))
 
     @classmethod
     def add_parser(cls, parser):
