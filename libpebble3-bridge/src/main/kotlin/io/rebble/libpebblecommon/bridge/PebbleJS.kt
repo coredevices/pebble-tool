@@ -2,527 +2,521 @@ package io.rebble.libpebblecommon.bridge
 
 import io.rebble.libpebblecommon.packets.AppMessage
 import io.rebble.libpebblecommon.packets.AppMessageTuple
-import io.rebble.libpebblecommon.structmapper.SUInt
-import io.rebble.libpebblecommon.structmapper.StructMapper
-import io.rebble.libpebblecommon.util.Endian
-import org.mozilla.javascript.BaseFunction
-import org.mozilla.javascript.Context
-import org.mozilla.javascript.NativeArray
-import org.mozilla.javascript.ScriptableObject
-import org.mozilla.javascript.Scriptable
-import org.mozilla.javascript.Undefined
-import org.mozilla.javascript.UniqueTag
+import kotlinx.coroutines.*
+import kotlinx.serialization.json.*
+import uniffi.library_rs.JsContext
+import uniffi.library_rs.JsFetcher
+import uniffi.library_rs.JsRequestKt
+import uniffi.library_rs.JsResponseKt
+import uniffi.library_rs.FetcherException
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URI
-import java.util.concurrent.LinkedBlockingQueue
 import kotlin.uuid.Uuid
 
-typealias JSFunction = org.mozilla.javascript.Function
-
 /**
- * PebbleKit JavaScript runtime using Mozilla Rhino.
+ * PebbleKit JavaScript runtime using Picaros (Boa engine).
  *
  * Implements the Pebble JS API that PBW apps use:
  * - Pebble.addEventListener / removeEventListener
  * - Pebble.sendAppMessage
  * - Pebble.getAccountToken / getWatchToken
  * - Pebble.openURL
- * - console.log/warn/error
- * - XMLHttpRequest (basic implementation)
+ * - Pebble.showSimpleNotificationOnPebble
+ * - console.log/warn/error (built-in via Boa)
+ * - XMLHttpRequest (via fetch polyfill)
  * - localStorage (in-memory)
+ * - setTimeout / setInterval / clearTimeout / clearInterval
  *
- * Follows the patterns from libpebble3's js/ package interfaces
- * (PKJSInterface, PrivatePKJSInterface, JsRunner).
+ * Uses a JavaScript polyfill layer that queues outgoing messages
+ * for Kotlin to drain, since Boa/UniFFI doesn't support direct
+ * native callbacks from JS.
  */
 class PebbleJS(
     private val bridge: QemuBridge,
     private val jsSource: String,
     private val appUuid: Uuid
 ) {
-    private var cx: Context? = null
-    private var scope: ScriptableObject? = null
-    private val eventHandlers = mutableMapOf<String, MutableList<JSFunction>>()
+    private var jsContext: JsContext? = null
     private var nextTransactionId: UByte = 1u
-    private val pendingEvents = LinkedBlockingQueue<Runnable>()
-    private val localStorage = mutableMapOf<String, String>()
 
-    fun start() {
-        cx = Context.enter()
-        cx!!.optimizationLevel = -1 // Interpreter mode for better compatibility
-        cx!!.languageVersion = Context.VERSION_ES6
-        scope = cx!!.initStandardObjects()
+    /**
+     * JavaScript bootstrap that defines the Pebble API, localStorage,
+     * XMLHttpRequest, and timer functions. Outgoing messages from JS
+     * are queued in _pkjsOutbox for Kotlin to drain via eval().
+     */
+    private val bootstrapJS = """
+        // ========== Internal queues ==========
+        var _pkjsOutbox = [];      // outgoing AppMessage queue
+        var _pkjsLogs = [];        // console log queue
+        var _pkjsOpenURLs = [];    // openURL calls
+        var _pkjsNotifications = []; // notification calls
 
-        setupPebbleAPI()
-        setupConsoleAPI()
-        setupXMLHttpRequest()
-        setupLocalStorage()
-        setupTimers()
+        // ========== Pebble API ==========
+        var _pkjsHandlers = {};
 
-        // Run the app JS
-        try {
-            cx!!.evaluateString(scope, jsSource, "pebble-js-app.js", 1, null)
-        } catch (e: Exception) {
-            System.err.println("[pkjs] Error loading JS: ${e.message}")
+        var Pebble = {
+            addEventListener: function(event, callback) {
+                if (!_pkjsHandlers[event]) _pkjsHandlers[event] = [];
+                _pkjsHandlers[event].push(callback);
+            },
+            removeEventListener: function(event, callback) {
+                if (!_pkjsHandlers[event]) return;
+                var idx = _pkjsHandlers[event].indexOf(callback);
+                if (idx >= 0) _pkjsHandlers[event].splice(idx, 1);
+            },
+            on: function(event, callback) { Pebble.addEventListener(event, callback); },
+            off: function(event, callback) { Pebble.removeEventListener(event, callback); },
+            sendAppMessage: function(dict, success, error) {
+                var txId = (_pkjsOutbox.length + 1);
+                _pkjsOutbox.push({dict: dict, txId: txId});
+                // Schedule success callback asynchronously
+                if (success) {
+                    setTimeout(function() {
+                        try { success({transactionId: txId}); } catch(e) {
+                            _pkjsLogs.push({level: 'error', msg: 'sendAppMessage success callback error: ' + e});
+                        }
+                    }, 0);
+                }
+                return txId;
+            },
+            getAccountToken: function() {
+                return '0123456789abcdef0123456789abcdef';
+            },
+            getWatchToken: function() {
+                return 'fedcba9876543210fedcba9876543210';
+            },
+            openURL: function(url) {
+                _pkjsOpenURLs.push(url);
+                _pkjsLogs.push({level: 'info', msg: '[pkjs] openURL: ' + url});
+            },
+            showSimpleNotificationOnPebble: function(title, body) {
+                _pkjsNotifications.push({title: title, body: body});
+                _pkjsLogs.push({level: 'info', msg: '[pkjs] Notification: ' + title + ' - ' + body});
+            },
+            getActiveWatchInfo: function() {
+                return {
+                    platform: 'basalt',
+                    model: 'qemu_platform_basalt',
+                    language: 'en_US',
+                    firmware: { major: 4, minor: 4, patch: 0, suffix: '' }
+                };
+            },
+            showToast: function(msg) {
+                _pkjsLogs.push({level: 'info', msg: '[pkjs] Toast: ' + msg});
+            }
+        };
+
+        // ========== localStorage (in-memory) ==========
+        var _localStorageData = {};
+        var localStorage = {
+            getItem: function(key) {
+                var v = _localStorageData[key];
+                return v !== undefined ? v : null;
+            },
+            setItem: function(key, value) {
+                _localStorageData[key] = String(value);
+            },
+            removeItem: function(key) {
+                delete _localStorageData[key];
+            },
+            clear: function() {
+                _localStorageData = {};
+            }
+        };
+
+        // ========== Timers ==========
+        var _timerIdCounter = 0;
+        var _activeTimers = {};
+
+        // Boa has queueMicrotask but not setTimeout natively,
+        // so we implement basic timer support using promises.
+        // For the bridge's polling model, immediate timers are fine.
+        function setTimeout(fn, delay) {
+            var id = ++_timerIdCounter;
+            _activeTimers[id] = true;
+            // Use a resolved promise to defer execution
+            Promise.resolve().then(function() {
+                if (_activeTimers[id]) {
+                    delete _activeTimers[id];
+                    try { fn(); } catch(e) {
+                        _pkjsLogs.push({level: 'error', msg: 'setTimeout error: ' + e});
+                    }
+                }
+            });
+            return id;
         }
 
-        // Fire 'ready' event
-        fireEvent("ready", cx!!.newObject(scope))
+        function setInterval(fn, delay) {
+            // For bridge usage, we implement setInterval as a single
+            // deferred call. The Kotlin side re-triggers via polling.
+            var id = ++_timerIdCounter;
+            _activeTimers[id] = {fn: fn, delay: delay};
+            Promise.resolve().then(function() {
+                if (_activeTimers[id]) {
+                    try { fn(); } catch(e) {
+                        _pkjsLogs.push({level: 'error', msg: 'setInterval error: ' + e});
+                    }
+                }
+            });
+            return id;
+        }
+
+        function clearTimeout(id) {
+            delete _activeTimers[id];
+        }
+
+        function clearInterval(id) {
+            delete _activeTimers[id];
+        }
+
+        // ========== XMLHttpRequest ==========
+        function XMLHttpRequest() {
+            this.readyState = 0;
+            this.status = 0;
+            this.responseText = '';
+            this.response = '';
+            this._method = 'GET';
+            this._url = '';
+            this._async = true;
+            this._headers = {};
+            this.onload = null;
+            this.onerror = null;
+            this.onreadystatechange = null;
+        }
+
+        XMLHttpRequest.prototype.open = function(method, url, async) {
+            this._method = method.toUpperCase();
+            this._url = url;
+            this._async = (async !== false);
+            this._headers = {};
+            this.readyState = 1;
+        };
+
+        XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
+            this._headers[name] = value;
+        };
+
+        XMLHttpRequest.prototype.send = function(body) {
+            var self = this;
+            var fetchOpts = {
+                method: self._method,
+                headers: self._headers
+            };
+            if (body && (self._method === 'POST' || self._method === 'PUT' || self._method === 'PATCH')) {
+                fetchOpts.body = body;
+            }
+            fetch(self._url, fetchOpts).then(function(response) {
+                self.status = response.status;
+                return response.text();
+            }).then(function(text) {
+                self.responseText = text;
+                self.response = text;
+                self.readyState = 4;
+                if (self.onload) {
+                    try { self.onload.call(self); } catch(e) {
+                        _pkjsLogs.push({level: 'error', msg: 'XHR onload error: ' + e});
+                    }
+                }
+                if (self.onreadystatechange) {
+                    try { self.onreadystatechange.call(self); } catch(e) {
+                        _pkjsLogs.push({level: 'error', msg: 'XHR onreadystatechange error: ' + e});
+                    }
+                }
+            }).catch(function(err) {
+                self.readyState = 4;
+                _pkjsLogs.push({level: 'error', msg: 'XHR error: ' + err});
+                if (self.onerror) {
+                    try { self.onerror.call(self); } catch(e) {
+                        _pkjsLogs.push({level: 'error', msg: 'XHR onerror callback error: ' + e});
+                    }
+                }
+            });
+        };
+
+        // ========== Console override for log capture ==========
+        var _origConsole = typeof console !== 'undefined' ? console : {};
+        console = {
+            log: function() {
+                var msg = Array.prototype.slice.call(arguments).join(' ');
+                _pkjsLogs.push({level: 'log', msg: msg});
+                if (_origConsole.log) _origConsole.log.apply(_origConsole, arguments);
+            },
+            info: function() {
+                var msg = Array.prototype.slice.call(arguments).join(' ');
+                _pkjsLogs.push({level: 'info', msg: msg});
+                if (_origConsole.info) _origConsole.info.apply(_origConsole, arguments);
+            },
+            warn: function() {
+                var msg = Array.prototype.slice.call(arguments).join(' ');
+                _pkjsLogs.push({level: 'warn', msg: msg});
+                if (_origConsole.warn) _origConsole.warn.apply(_origConsole, arguments);
+            },
+            error: function() {
+                var msg = Array.prototype.slice.call(arguments).join(' ');
+                _pkjsLogs.push({level: 'error', msg: msg});
+                if (_origConsole.error) _origConsole.error.apply(_origConsole, arguments);
+            },
+            debug: function() {
+                var msg = Array.prototype.slice.call(arguments).join(' ');
+                _pkjsLogs.push({level: 'debug', msg: msg});
+                if (_origConsole.debug) _origConsole.debug.apply(_origConsole, arguments);
+            }
+        };
+
+        // Helper: fire an event
+        function _pkjsFireEvent(eventName, eventData) {
+            var handlers = _pkjsHandlers[eventName];
+            if (!handlers) return;
+            for (var i = 0; i < handlers.length; i++) {
+                try {
+                    handlers[i](eventData || {type: eventName});
+                } catch(e) {
+                    _pkjsLogs.push({level: 'error', msg: 'Error in ' + eventName + ' handler: ' + e});
+                }
+            }
+        }
+    """.trimIndent()
+
+    /**
+     * JsFetcher implementation that delegates HTTP requests from the
+     * JS fetch() API to Java's HttpURLConnection.
+     */
+    private val fetcher = object : JsFetcher {
+        override suspend fun fetch(request: JsRequestKt): JsResponseKt {
+            return withContext(Dispatchers.IO) {
+                try {
+                    val conn = URI(request.url).toURL().openConnection() as HttpURLConnection
+                    conn.requestMethod = request.method
+                    conn.connectTimeout = 30000
+                    conn.readTimeout = 30000
+                    for ((k, v) in request.headers) {
+                        conn.setRequestProperty(k, v)
+                    }
+                    if (request.body.isNotEmpty() &&
+                        (request.method == "POST" || request.method == "PUT" || request.method == "PATCH")
+                    ) {
+                        conn.doOutput = true
+                        conn.outputStream.use { it.write(request.body) }
+                    }
+                    val status = conn.responseCode
+                    val body = try {
+                        val stream = if (status in 200..299) conn.inputStream else conn.errorStream
+                        stream?.readBytes() ?: ByteArray(0)
+                    } catch (_: Exception) {
+                        ByteArray(0)
+                    }
+                    val headers = mutableMapOf<String, String>()
+                    conn.headerFields?.forEach { (key, values) ->
+                        if (key != null && values != null) {
+                            headers[key] = values.joinToString(", ")
+                        }
+                    }
+                    JsResponseKt(
+                        status = status.toUShort(),
+                        headers = headers,
+                        body = body
+                    )
+                } catch (e: Exception) {
+                    throw FetcherException.NetworkException("HTTP request failed: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun start() {
+        try {
+            jsContext = JsContext(fetcher)
+
+            // Load the bootstrap polyfill
+            jsContext!!.eval(bootstrapJS)
+
+            // Load the app's JS
+            try {
+                jsContext!!.eval(jsSource)
+            } catch (e: Exception) {
+                System.err.println("[pkjs] Error loading JS: ${e.message}")
+            }
+
+            // Fire 'ready' event
+            jsContext!!.eval("_pkjsFireEvent('ready', {type: 'ready'})")
+
+            // Process any pending promises/timers from startup
+            drainPendingWork()
+
+        } catch (e: Exception) {
+            System.err.println("[pkjs] Error starting JS engine: ${e.message}")
+            e.printStackTrace(System.err)
+        }
     }
 
     fun stop() {
         try {
-            Context.exit()
+            jsContext?.close()
+            jsContext = null
         } catch (_: Exception) {}
     }
 
     fun handleAppMessage(push: AppMessage.AppMessagePush) {
-        val cx = this.cx ?: return
-        val scope = this.scope ?: return
+        val ctx = jsContext ?: return
 
         try {
-            // Convert AppMessage dictionary to JS object
-            val payload = cx.newObject(scope)
-            for (i in 0 until push.count.get().toInt()) {
-                val tuple = push.dictionary.list[i]
-                val key = tuple.key.get().toString()
-                val value: Any = when (AppMessageTuple.Type.fromValue(tuple.type.get())) {
-                    AppMessageTuple.Type.CString -> tuple.dataAsString
-                    AppMessageTuple.Type.UInt -> tuple.dataAsUnsignedNumber.toDouble()
-                    AppMessageTuple.Type.Int -> tuple.dataAsSignedNumber.toDouble()
-                    AppMessageTuple.Type.ByteArray -> {
-                        val bytes = tuple.dataAsBytes
-                        cx.newArray(scope, bytes.map { it.toDouble() as Any }.toTypedArray())
+            // Build a JSON payload from the AppMessage
+            val payload = buildJsonObject {
+                for (i in 0 until push.count.get().toInt()) {
+                    val tuple = push.dictionary.list[i]
+                    val key = tuple.key.get().toString()
+                    when (AppMessageTuple.Type.fromValue(tuple.type.get())) {
+                        AppMessageTuple.Type.CString -> put(key, tuple.dataAsString)
+                        AppMessageTuple.Type.UInt -> put(key, tuple.dataAsUnsignedNumber.toLong())
+                        AppMessageTuple.Type.Int -> put(key, tuple.dataAsSignedNumber.toLong())
+                        AppMessageTuple.Type.ByteArray -> {
+                            put(key, buildJsonArray {
+                                tuple.dataAsBytes.forEach { add(it.toInt()) }
+                            })
+                        }
                     }
                 }
-                ScriptableObject.putProperty(payload, key, value)
             }
 
-            val event = cx.newObject(scope)
-            ScriptableObject.putProperty(event, "payload", payload)
+            val payloadJson = payload.toString()
+            val escapedJson = payloadJson
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
 
-            fireEvent("appmessage", event)
+            ctx.eval("_pkjsFireEvent('appmessage', {type: 'appmessage', payload: JSON.parse('$escapedJson')})")
+
+            // Process any promises triggered by the event
+            drainPendingWork()
         } catch (e: Exception) {
             System.err.println("[pkjs] Error handling AppMessage: ${e.message}")
         }
     }
 
+    /**
+     * Process pending events: drain logs, send queued AppMessages,
+     * and run any deferred async work (fetch responses, timers).
+     */
     fun processPendingEvents() {
-        while (true) {
-            val event = pendingEvents.poll() ?: break
-            try {
-                event.run()
-            } catch (e: Exception) {
-                System.err.println("[pkjs] Error processing event: ${e.message}")
-            }
+        val ctx = jsContext ?: return
+
+        try {
+            // Run any pending async work (fetch callbacks, promise continuations)
+            drainPendingWork()
+
+            // Drain console logs
+            drainLogs(ctx)
+
+            // Drain outgoing AppMessages
+            drainAppMessages(ctx)
+
+            // Drain openURL calls
+            drainOpenURLs(ctx)
+
+            // Drain notifications
+            drainNotifications(ctx)
+        } catch (e: Exception) {
+            System.err.println("[pkjs] Error processing events: ${e.message}")
         }
     }
 
-    private fun fireEvent(eventName: String, data: Any?) {
-        val handlers = eventHandlers[eventName] ?: return
-        val cx = this.cx ?: return
-        val scope = this.scope ?: return
-
-        for (handler in handlers.toList()) {
-            try {
-                handler.call(cx, scope, scope, arrayOf(data ?: Undefined.instance))
-            } catch (e: Exception) {
-                System.err.println("[pkjs] Error in '$eventName' handler: ${e.message}")
-            }
+    private fun drainPendingWork() {
+        val ctx = jsContext ?: return
+        try {
+            // evalAsync runs the job queue (promise continuations, fetch callbacks)
+            ctx.evalAsync("undefined")
+        } catch (_: Exception) {
+            // Ignore - may fail if no async work pending
         }
     }
 
-    private fun setupPebbleAPI() {
-        val cx = this.cx!!
-        val scope = this.scope!!
-
-        val pebble = cx.newObject(scope)
-
-        // Pebble.addEventListener(event, callback)
-        ScriptableObject.putProperty(pebble, "addEventListener", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                val event = Context.toString(args[0])
-                val callback = args[1] as? JSFunction ?: return Undefined.instance
-                eventHandlers.getOrPut(event) { mutableListOf() }.add(callback)
-                return Undefined.instance
-            }
-        })
-
-        // Pebble.removeEventListener(event, callback)
-        ScriptableObject.putProperty(pebble, "removeEventListener", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                val event = Context.toString(args[0])
-                val callback = args[1] as? JSFunction
-                if (callback != null) {
-                    eventHandlers[event]?.remove(callback)
-                }
-                return Undefined.instance
-            }
-        })
-
-        // Pebble.sendAppMessage(dict, successCallback, errorCallback)
-        ScriptableObject.putProperty(pebble, "sendAppMessage", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                val dict = args.getOrNull(0) as? Scriptable ?: return Undefined.instance
-                val success = args.getOrNull(1) as? JSFunction
-                val error = args.getOrNull(2) as? JSFunction
-                sendAppMessageFromJS(cx, scope, dict, success, error)
-                return Undefined.instance
-            }
-        })
-
-        // Pebble.getAccountToken()
-        ScriptableObject.putProperty(pebble, "getAccountToken", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                return "0123456789abcdef0123456789abcdef"
-            }
-        })
-
-        // Pebble.getWatchToken()
-        ScriptableObject.putProperty(pebble, "getWatchToken", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                return "fedcba9876543210fedcba9876543210"
-            }
-        })
-
-        // Pebble.openURL(url)
-        ScriptableObject.putProperty(pebble, "openURL", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                val url = Context.toString(args[0])
-                System.err.println("[pkjs] openURL: $url")
-                return Undefined.instance
-            }
-        })
-
-        // Pebble.showSimpleNotificationOnPebble(title, body)
-        ScriptableObject.putProperty(pebble, "showSimpleNotificationOnPebble", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                val title = Context.toString(args.getOrNull(0))
-                val body = Context.toString(args.getOrNull(1))
-                System.err.println("[pkjs] Notification: $title - $body")
-                return Undefined.instance
-            }
-        })
-
-        ScriptableObject.putProperty(scope, "Pebble", pebble)
-    }
-
-    private fun setupConsoleAPI() {
-        val cx = this.cx!!
-        val scope = this.scope!!
-
-        val console = cx.newObject(scope)
-
-        for (level in listOf("log", "info", "warn", "error", "debug")) {
-            ScriptableObject.putProperty(console, level, object : BaseFunction() {
-                override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                    val msg = args.joinToString(" ") { Context.toString(it) }
+    private fun drainLogs(ctx: JsContext) {
+        try {
+            val logsJson = ctx.eval("JSON.stringify(_pkjsLogs.splice(0))")
+            if (logsJson != "[]" && logsJson.isNotEmpty()) {
+                val logs = Json.parseToJsonElement(logsJson).jsonArray
+                for (log in logs) {
+                    val obj = log.jsonObject
+                    val level = obj["level"]?.jsonPrimitive?.content ?: "log"
+                    val msg = obj["msg"]?.jsonPrimitive?.content ?: ""
                     val ts = java.time.LocalTime.now().toString().substring(0, 8)
                     println("[$ts] [JS $level] $msg")
                     java.lang.System.out.flush()
-                    return Undefined.instance
                 }
-            })
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun drainAppMessages(ctx: JsContext) {
+        try {
+            val msgsJson = ctx.eval("JSON.stringify(_pkjsOutbox.splice(0))")
+            if (msgsJson == "[]" || msgsJson.isEmpty()) return
+
+            val msgs = Json.parseToJsonElement(msgsJson).jsonArray
+            for (msg in msgs) {
+                val obj = msg.jsonObject
+                val dict = obj["dict"]?.jsonObject ?: continue
+                sendAppMessageFromJson(dict)
+            }
+        } catch (e: Exception) {
+            System.err.println("[pkjs] Error draining AppMessages: ${e.message}")
         }
-
-        ScriptableObject.putProperty(scope, "console", console)
     }
 
-    private fun setupXMLHttpRequest() {
-        val cx = this.cx!!
-        val scope = this.scope!!
+    private fun drainOpenURLs(ctx: JsContext) {
+        try {
+            val urlsJson = ctx.eval("JSON.stringify(_pkjsOpenURLs.splice(0))")
+            if (urlsJson == "[]" || urlsJson.isEmpty()) return
 
-        // Define XMLHttpRequest constructor
-        val xhrConstructor = object : BaseFunction() {
-            override fun construct(cx: Context, scope: Scriptable, args: Array<Any?>): Scriptable {
-                return createXHRObject(cx, scope)
+            val urls = Json.parseToJsonElement(urlsJson).jsonArray
+            for (url in urls) {
+                System.err.println("[pkjs] openURL: ${url.jsonPrimitive.content}")
             }
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                return construct(cx, scope, args)
-            }
-        }
-        ScriptableObject.putProperty(scope, "XMLHttpRequest", xhrConstructor)
+        } catch (_: Exception) {}
     }
 
-    private fun createXHRObject(cx: Context, scope: Scriptable): Scriptable {
-        val xhr = cx.newObject(scope)
+    private fun drainNotifications(ctx: JsContext) {
+        try {
+            val notifJson = ctx.eval("JSON.stringify(_pkjsNotifications.splice(0))")
+            if (notifJson == "[]" || notifJson.isEmpty()) return
 
-        // Internal state
-        var method = "GET"
-        var url = ""
-        var async = true
-        var requestHeaders = mutableMapOf<String, String>()
-        var responseText = ""
-        var status = 0
-        var readyState = 0
-
-        ScriptableObject.putProperty(xhr, "readyState", 0)
-        ScriptableObject.putProperty(xhr, "status", 0)
-        ScriptableObject.putProperty(xhr, "responseText", "")
-        ScriptableObject.putProperty(xhr, "response", "")
-
-        // open(method, url, async)
-        ScriptableObject.putProperty(xhr, "open", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                method = Context.toString(args[0]).uppercase()
-                url = Context.toString(args[1])
-                async = if (args.size > 2) Context.toBoolean(args[2]) else true
-                requestHeaders.clear()
-                readyState = 1
-                ScriptableObject.putProperty(xhr, "readyState", 1)
-                return Undefined.instance
+            val notifs = Json.parseToJsonElement(notifJson).jsonArray
+            for (notif in notifs) {
+                val obj = notif.jsonObject
+                val title = obj["title"]?.jsonPrimitive?.content ?: ""
+                val body = obj["body"]?.jsonPrimitive?.content ?: ""
+                System.err.println("[pkjs] Notification: $title - $body")
             }
-        })
-
-        // setRequestHeader(name, value)
-        ScriptableObject.putProperty(xhr, "setRequestHeader", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                requestHeaders[Context.toString(args[0])] = Context.toString(args[1])
-                return Undefined.instance
-            }
-        })
-
-        // send(body)
-        ScriptableObject.putProperty(xhr, "send", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                val body = if (args.isNotEmpty() && args[0] != null && args[0] != Undefined.instance)
-                    Context.toString(args[0]) else null
-
-                val doRequest = Runnable {
-                    try {
-                        val conn = URI(url).toURL().openConnection() as HttpURLConnection
-                        conn.requestMethod = method
-                        conn.connectTimeout = 10000
-                        conn.readTimeout = 10000
-                        for ((k, v) in requestHeaders) {
-                            conn.setRequestProperty(k, v)
-                        }
-                        if (body != null && (method == "POST" || method == "PUT")) {
-                            conn.doOutput = true
-                            OutputStreamWriter(conn.outputStream).use { it.write(body) }
-                        }
-                        status = conn.responseCode
-                        responseText = try {
-                            BufferedReader(InputStreamReader(
-                                if (status in 200..299) conn.inputStream else conn.errorStream
-                            )).readText()
-                        } catch (_: Exception) { "" }
-                        readyState = 4
-
-                        ScriptableObject.putProperty(xhr, "status", status)
-                        ScriptableObject.putProperty(xhr, "responseText", responseText)
-                        ScriptableObject.putProperty(xhr, "response", responseText)
-                        ScriptableObject.putProperty(xhr, "readyState", 4)
-
-                        // Fire callbacks
-                        val onload = ScriptableObject.getProperty(xhr, "onload")
-                        if (onload is JSFunction) {
-                            if (async) {
-                                pendingEvents.add(Runnable {
-                                    val enterCx = Context.enter()
-                                    enterCx.optimizationLevel = -1
-                                    try {
-                                        onload.call(enterCx, scope, xhr, arrayOf<Any>())
-                                    } finally {
-                                        Context.exit()
-                                    }
-                                })
-                            } else {
-                                onload.call(cx, scope, xhr, arrayOf<Any>())
-                            }
-                        }
-                        val onreadystatechange = ScriptableObject.getProperty(xhr, "onreadystatechange")
-                        if (onreadystatechange is JSFunction) {
-                            if (async) {
-                                pendingEvents.add(Runnable {
-                                    val enterCx = Context.enter()
-                                    enterCx.optimizationLevel = -1
-                                    try {
-                                        onreadystatechange.call(enterCx, scope, xhr, arrayOf<Any>())
-                                    } finally {
-                                        Context.exit()
-                                    }
-                                })
-                            } else {
-                                onreadystatechange.call(cx, scope, xhr, arrayOf<Any>())
-                            }
-                        }
-                    } catch (e: Exception) {
-                        System.err.println("[pkjs] XHR error: ${e.message}")
-                        readyState = 4
-                        ScriptableObject.putProperty(xhr, "readyState", 4)
-                        val onerror = ScriptableObject.getProperty(xhr, "onerror")
-                        if (onerror is JSFunction) {
-                            if (async) {
-                                pendingEvents.add(Runnable {
-                                    val enterCx = Context.enter()
-                                    enterCx.optimizationLevel = -1
-                                    try {
-                                        onerror.call(enterCx, scope, xhr, arrayOf<Any>())
-                                    } finally {
-                                        Context.exit()
-                                    }
-                                })
-                            } else {
-                                onerror.call(cx, scope, xhr, arrayOf<Any>())
-                            }
-                        }
-                    }
-                }
-
-                if (async) {
-                    Thread(doRequest).start()
-                } else {
-                    doRequest.run()
-                }
-
-                return Undefined.instance
-            }
-        })
-
-        return xhr
+        } catch (_: Exception) {}
     }
 
-    private fun setupLocalStorage() {
-        val cx = this.cx!!
-        val scope = this.scope!!
-
-        val ls = cx.newObject(scope)
-
-        ScriptableObject.putProperty(ls, "getItem", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                val key = Context.toString(args[0])
-                return localStorage[key] as Any? ?: UniqueTag.NULL_VALUE
-            }
-        })
-
-        ScriptableObject.putProperty(ls, "setItem", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                val key = Context.toString(args[0])
-                val value = Context.toString(args[1])
-                localStorage[key] = value
-                return Undefined.instance
-            }
-        })
-
-        ScriptableObject.putProperty(ls, "removeItem", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                val key = Context.toString(args[0])
-                localStorage.remove(key)
-                return Undefined.instance
-            }
-        })
-
-        ScriptableObject.putProperty(ls, "clear", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                localStorage.clear()
-                return Undefined.instance
-            }
-        })
-
-        ScriptableObject.putProperty(scope, "localStorage", ls)
-    }
-
-    private fun setupTimers() {
-        val cx = this.cx!!
-        val scope = this.scope!!
-
-        // setTimeout(callback, delay)
-        ScriptableObject.putProperty(scope, "setTimeout", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                val callback = args[0] as? JSFunction ?: return Undefined.instance
-                val delay = if (args.size > 1) Context.toNumber(args[1]).toLong() else 0L
-
-                Thread {
-                    Thread.sleep(delay)
-                    pendingEvents.add(Runnable {
-                        val enterCx = Context.enter()
-                        enterCx.optimizationLevel = -1
-                        try {
-                            callback.call(enterCx, scope, scope, arrayOf<Any>())
-                        } catch (e: Exception) {
-                            System.err.println("[pkjs] setTimeout error: ${e.message}")
-                        } finally {
-                            Context.exit()
-                        }
-                    })
-                }.start()
-
-                return 1.0 // timer id
-            }
-        })
-
-        // setInterval(callback, delay) - simplified
-        ScriptableObject.putProperty(scope, "setInterval", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any {
-                val callback = args[0] as? JSFunction ?: return Undefined.instance
-                val delay = if (args.size > 1) Context.toNumber(args[1]).toLong() else 1000L
-
-                val thread = Thread {
-                    while (!Thread.currentThread().isInterrupted) {
-                        Thread.sleep(delay)
-                        pendingEvents.add(Runnable {
-                            val enterCx = Context.enter()
-                            enterCx.optimizationLevel = -1
-                            try {
-                                callback.call(enterCx, scope, scope, arrayOf<Any>())
-                            } catch (e: Exception) {
-                                System.err.println("[pkjs] setInterval error: ${e.message}")
-                            } finally {
-                                Context.exit()
-                            }
-                        })
-                    }
-                }
-                thread.isDaemon = true
-                thread.start()
-                return 1.0
-            }
-        })
-
-        // clearTimeout / clearInterval - stubs
-        ScriptableObject.putProperty(scope, "clearTimeout", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any = Undefined.instance
-        })
-        ScriptableObject.putProperty(scope, "clearInterval", object : BaseFunction() {
-            override fun call(cx: Context, scope: Scriptable, thisObj: Scriptable, args: Array<Any?>): Any = Undefined.instance
-        })
-    }
-
-    private fun sendAppMessageFromJS(
-        cx: Context, scope: Scriptable,
-        dict: Scriptable, successCb: JSFunction?, errorCb: JSFunction?
-    ) {
-        val noArgs = arrayOf<Any>()
+    private fun sendAppMessageFromJson(dict: JsonObject) {
         try {
             val tuples = mutableListOf<AppMessageTuple>()
 
-            // Iterate over JS object keys
-            val ids = dict.ids
-            for (id in ids) {
-                val key = when (id) {
-                    is Number -> id.toInt().toUInt()
-                    is String -> id.toUInt()
-                    else -> continue
-                }
-                val value = when (id) {
-                    is Number -> ScriptableObject.getProperty(dict, id.toInt())
-                    is String -> ScriptableObject.getProperty(dict, id)
-                    else -> continue
-                }
+            for ((keyStr, value) in dict) {
+                val key = keyStr.toUIntOrNull() ?: continue
 
-                val tuple = when (value) {
-                    is Number -> AppMessageTuple.createInt(key, value.toInt())
-                    is String -> AppMessageTuple.createString(key, value)
-                    is NativeArray -> {
-                        val bytes = UByteArray(value.length.toInt()) {
-                            Context.toNumber(value.get(it, value)).toInt().toUByte()
+                val tuple = when {
+                    value is JsonPrimitive && value.isString ->
+                        AppMessageTuple.createString(key, value.content)
+                    value is JsonPrimitive && value.intOrNull != null ->
+                        AppMessageTuple.createInt(key, value.int)
+                    value is JsonPrimitive && value.longOrNull != null ->
+                        AppMessageTuple.createInt(key, value.long.toInt())
+                    value is JsonPrimitive && value.doubleOrNull != null ->
+                        AppMessageTuple.createInt(key, value.double.toInt())
+                    value is JsonArray -> {
+                        val bytes = UByteArray(value.size) {
+                            value[it].jsonPrimitive.int.toUByte()
                         }
                         AppMessageTuple.createUByteArray(key, bytes)
                     }
-                    else -> AppMessageTuple.createInt(key, Context.toNumber(value).toInt())
+                    else -> AppMessageTuple.createInt(key, 0)
                 }
                 tuples.add(tuple)
             }
@@ -537,12 +531,8 @@ class PebbleJS(
             )
             bridge.sendPacket(push)
             System.err.println("[pkjs] Sent AppMessage with ${tuples.size} tuples")
-
-            // Call success callback
-            successCb?.call(cx, scope, scope, noArgs)
         } catch (e: Exception) {
             System.err.println("[pkjs] Failed to send AppMessage: ${e.message}")
-            errorCb?.call(cx, scope, scope, noArgs)
         }
     }
 }

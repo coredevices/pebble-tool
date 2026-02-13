@@ -685,7 +685,7 @@ class QemuBridge(private val port: Int) {
 
     /**
      * Stream logs with PKJS support. Extracts pebble-js-app.js from PBW
-     * and runs it using Mozilla Rhino, handling AppMessage bidirectionally.
+     * and runs it using Picaros (Boa engine), handling AppMessage bidirectionally.
      */
     fun streamLogsWithPKJS(pbwPath: String, platform: String) {
         System.err.println("[bridge] Streaming logs with PKJS support (Ctrl+C to stop)...")
