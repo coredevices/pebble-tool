@@ -13,7 +13,7 @@ import sys
 from libpebble2.exceptions import ScreenshotError
 from libpebble2.services.screenshot import Screenshot
 
-from .base import PebbleCommand
+from .base import PebbleCommand, BaseCommand
 from pebble_tool.exceptions import ToolError
 
 
@@ -40,6 +40,34 @@ class ScreenshotCommand(PebbleCommand):
         self.started = False
 
     def __call__(self, args):
+        emulator_platform = getattr(args, 'emulator', None)
+        if emulator_platform:
+            BaseCommand.__call__(self, args)
+            import base64
+            import json
+            from pebble_tool.bridge import run_bridge_capture, ensure_bridge_qemu
+            qemu_port, _ = ensure_bridge_qemu(args)
+            rc, output = run_bridge_capture('screenshot', qemu_port)
+            if rc != 0:
+                raise ToolError("Screenshot failed (exit code {}).".format(rc))
+            data = json.loads(output.strip())
+            width = data['width']
+            height = data['height']
+            version = data['version']
+            raw = base64.b64decode(data['data'])
+            image = self._decode_raw_screenshot(raw, width, height, version)
+            if not args.no_correction:
+                image = self._correct_colours(image)
+            image = self._roundify_with_platform(image, emulator_platform)
+            if args.scale > 1:
+                image = self._scale_image(image, args.scale)
+            filename = self._generate_filename() if args.filename is None else args.filename
+            png.from_array(image, mode='RGBA;8').save(filename)
+            print("Saved screenshot to {}".format(filename))
+            if not args.no_open:
+                self._open(os.path.abspath(filename))
+            return
+
         super(ScreenshotCommand, self).__call__(args)
         screenshot = Screenshot(self.pebble)
         screenshot.register_handler("progress", self._handle_progress)
@@ -71,6 +99,50 @@ class ScreenshotCommand(PebbleCommand):
             self.progress_bar.maxval = total
             self.started = True
         self.progress_bar.update(progress)
+
+    @staticmethod
+    def _decode_raw_screenshot(raw, width, height, version):
+        """Decode raw screenshot bytes to RGB rows (same format as libpebble2)."""
+        output = []
+        if version == 1:
+            # 1bpp B&W (Aplite) - LSB first within each byte
+            row_bytes = width // 8
+            for row in range(height):
+                row_values = []
+                for col in range(width):
+                    pixel = (raw[row * row_bytes + col // 8] >> (col % 8)) & 1
+                    row_values.extend([pixel * 255] * 3)
+                output.append(row_values)
+        else:
+            # 8bpp color (GColor8: 0bAARRGGBB, 2 bits per channel)
+            for row in range(height):
+                row_values = []
+                for col in range(width):
+                    pixel = raw[row * width + col]
+                    row_values.extend([
+                        ((pixel >> 4) & 0x3) * 85,
+                        ((pixel >> 2) & 0x3) * 85,
+                        (pixel & 0x3) * 85,
+                    ])
+                output.append(row_values)
+        return output
+
+    def _roundify_with_platform(self, image, platform):
+        """Convert RGB to RGBA with round-watch transparency (bridge mode)."""
+        rgba = [list(itertools.chain(*[(y[x], y[x+1], y[x+2], 255) for x in range(0, len(y), 3)])) for y in image]
+        should_roundify = (platform == 'chalk')
+        roundness = [76, 71, 66, 63, 60, 57, 55, 52, 50, 48, 46, 45, 43, 41, 40, 38, 37,
+                     36, 34, 33, 32, 31, 29, 28, 27, 26, 25, 24, 23, 22, 22, 21, 20, 19,
+                     18, 18, 17, 16, 15, 15, 14, 13, 13, 12, 12, 11, 10, 10, 9, 9, 8, 8, 7,
+                     7, 7, 6, 6, 5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        roundness.extend(reversed(roundness))
+        if should_roundify:
+            for row, skip in zip(rgba, roundness):
+                for x in range(3, len(row), 4):
+                    if not skip <= x // 4 < len(row) // 4 - skip:
+                        row[x] = 0
+        return rgba
 
     def _correct_colours(self, image):
         mapping = {

@@ -25,6 +25,13 @@ class DataLoggingCommand(PebbleCommand):
 
 
     def __call__(self, args):
+        emulator_platform = getattr(args, 'emulator', None)
+        if emulator_platform:
+            from .base import BaseCommand
+            BaseCommand.__call__(self, args)
+            self._call_bridge(args)
+            return
+
         super(DataLoggingCommand, self).__call__(args)
 
         data_logging_service = DataLoggingService(self.pebble)
@@ -83,6 +90,56 @@ class DataLoggingCommand(PebbleCommand):
         elif args.command == 'disable-sends':
             data_logging_service.set_send_enable(False)
             self._print_send_enable_status(data_logging_service)
+
+    def _call_bridge(self, args):
+        import json
+        from pebble_tool.bridge import run_bridge, run_bridge_capture, ensure_bridge_qemu
+        qemu_port, _ = ensure_bridge_qemu(args)
+
+        if args.command == 'list':
+            rc, output = run_bridge_capture('data-logging-list', qemu_port)
+            if rc != 0:
+                raise ToolError("Data logging list failed (exit code {}).".format(rc))
+            data = json.loads(output.strip())
+            sessions = data.get('sessions', [])
+            if sessions:
+                keys = ['id', 'uuid', 'timestamp', 'tag', 'type', 'size']
+                for key in keys:
+                    print("{:<20} ".format(key), end="")
+                print()
+                print("-" * 20 * len(keys))
+                for s in sessions:
+                    for key in keys:
+                        print("{:<20} ".format(s.get(key, '')), end="")
+                    print()
+            else:
+                print("No data logging sessions found")
+
+        elif args.command == 'get-sends-enabled':
+            rc, output = run_bridge_capture('data-logging-get-send-enabled', qemu_port)
+            if rc != 0:
+                raise ToolError("Data logging get-send-enabled failed (exit code {}).".format(rc))
+            data = json.loads(output.strip())
+            enabled = data.get('enabled', False)
+            status = "ENABLED" if enabled else "DISABLED"
+            print("Sending of sessions from watch to phone is {}".format(status))
+
+        elif args.command == 'enable-sends':
+            rc = run_bridge('data-logging-set-send-enabled', qemu_port, extra_args=['1'])
+            if rc != 0:
+                raise ToolError("Data logging enable-sends failed (exit code {}).".format(rc))
+            print("Sending of sessions from watch to phone is ENABLED")
+
+        elif args.command == 'disable-sends':
+            rc = run_bridge('data-logging-set-send-enabled', qemu_port, extra_args=['0'])
+            if rc != 0:
+                raise ToolError("Data logging disable-sends failed (exit code {}).".format(rc))
+            print("Sending of sessions from watch to phone is DISABLED")
+
+        elif args.command == 'download':
+            # Download not yet supported via bridge
+            raise ToolError("Data logging download is not yet supported via the bridge. "
+                            "Use --qemu or --phone connection instead.")
 
 
 

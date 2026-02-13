@@ -13,10 +13,19 @@ from libpebble2.communication.transports.qemu import MessageTargetQemu, QemuTran
 import math
 import os
 
-from .base import PebbleCommand
+from .base import PebbleCommand, BaseCommand
 from ..exceptions import ToolError
 from pebble_tool.sdk.emulator import ManagedEmulatorTransport
 from pebble_tool.util.browser import BrowserController
+
+# Button bitmask values matching libpebble2's QemuButton.Button
+BRIDGE_BUTTON_MAP = {'back': 1, 'up': 2, 'select': 4, 'down': 8}
+
+# Tap axis values matching libpebble2's QemuTap.Axis
+BRIDGE_TAP_AXIS = {'x': 0, 'y': 1, 'z': 2}
+
+# Content size values matching libpebble2's QemuContentSize.ContentSize
+BRIDGE_CONTENT_SIZE = {'small': 0, 'medium': 1, 'large': 2, 'x-large': 3}
 
 
 def send_data_to_qemu(transport, data):
@@ -39,7 +48,51 @@ class EmuAccelCommand(PebbleCommand):
     command = 'emu-accel'
     valid_connections = {'qemu', 'emulator'}
 
+    # Predefined motion samples as (x, y, z) tuples
+    MOTIONS = {
+        'tilt-left': [(-500, 0, -900), (-900, 0, -500), (-1000, 0, 0)],
+        'tilt-right': [(500, 0, -900), (900, 0, -500), (1000, 0, 0)],
+        'tilt-forward': [(0, 500, -900), (0, 900, -500), (0, 1000, 0)],
+        'tilt-back': [(0, -500, -900), (0, -900, -500), (0, -1000, 0)],
+        'gravity+x': [(1000, 0, 0)],
+        'gravity-x': [(-1000, 0, 0)],
+        'gravity+y': [(0, 1000, 0)],
+        'gravity-y': [(0, -1000, 0)],
+        'gravity+z': [(0, 0, 1000)],
+        'gravity-z': [(0, 0, -1000)],
+        'none': [(0, 0, 0)],
+    }
+
+    def _get_samples_tuples(self, args):
+        """Get accel samples as list of (x, y, z) tuples."""
+        if args.motion == 'custom' and args.file is not None:
+            samples = []
+            for line in args.file:
+                line = line.strip()
+                if line:
+                    parts = [int(x) for x in line.split(',')]
+                    samples.append((parts[0], parts[1], parts[2]))
+            return samples
+        elif args.motion != 'custom':
+            return self.MOTIONS[args.motion]
+        else:
+            raise ToolError("No accel filename or motion specified.")
+
     def __call__(self, args):
+        emulator_platform = getattr(args, 'emulator', None)
+        if emulator_platform:
+            BaseCommand.__call__(self, args)
+            from pebble_tool.bridge import run_bridge, ensure_bridge_qemu
+            qemu_port, _ = ensure_bridge_qemu(args)
+            samples = self._get_samples_tuples(args)
+            if len(samples) > 255:
+                raise ToolError("Cannot send {} samples. Max is 255.".format(len(samples)))
+            extra = [str(len(samples))] + ['{},{},{}'.format(x, y, z) for x, y, z in samples]
+            rc = run_bridge('emu-accel', qemu_port, extra_args=extra)
+            if rc != 0:
+                raise ToolError("Accel command failed (exit code {}).".format(rc))
+            return
+
         super(EmuAccelCommand, self).__call__(args)
         if args.motion == 'custom' and args.file is not None:
             samples = []
@@ -143,6 +196,17 @@ class EmuBatteryCommand(PebbleCommand):
     valid_connections = {'qemu', 'emulator'}
 
     def __call__(self, args):
+        emulator_platform = getattr(args, 'emulator', None)
+        if emulator_platform:
+            BaseCommand.__call__(self, args)
+            from pebble_tool.bridge import run_bridge, ensure_bridge_qemu
+            qemu_port, _ = ensure_bridge_qemu(args)
+            charging = '1' if args.charging else '0'
+            rc = run_bridge('emu-battery', qemu_port, extra_args=[str(args.percent), charging])
+            if rc != 0:
+                raise ToolError("Battery command failed (exit code {}).".format(rc))
+            return
+
         super(EmuBatteryCommand, self).__call__(args)
         battery_input = QemuBattery(percent=args.percent, charging=args.charging)
         send_data_to_qemu(self.pebble.transport, battery_input)
@@ -162,6 +226,17 @@ class EmuBluetoothConnectionCommand(PebbleCommand):
     valid_connections = {'qemu', 'emulator'}
 
     def __call__(self, args):
+        emulator_platform = getattr(args, 'emulator', None)
+        if emulator_platform:
+            BaseCommand.__call__(self, args)
+            from pebble_tool.bridge import run_bridge, ensure_bridge_qemu
+            qemu_port, _ = ensure_bridge_qemu(args)
+            connected_val = '1' if args.connected == 'yes' else '0'
+            rc = run_bridge('emu-bt-connection', qemu_port, extra_args=[connected_val])
+            if rc != 0:
+                raise ToolError("BT connection command failed (exit code {}).".format(rc))
+            return
+
         super(EmuBluetoothConnectionCommand, self).__call__(args)
         connected = args.connected == 'yes'
         bt_input = QemuBluetoothConnection(connected=connected)
@@ -181,6 +256,25 @@ class EmuCompassCommand(PebbleCommand):
     valid_connections = {'qemu', 'emulator'}
 
     def __call__(self, args):
+        emulator_platform = getattr(args, 'emulator', None)
+        if emulator_platform:
+            BaseCommand.__call__(self, args)
+            from pebble_tool.bridge import run_bridge, ensure_bridge_qemu
+            qemu_port, _ = ensure_bridge_qemu(args)
+            calibration = 2  # Complete
+            if args.uncalibrated:
+                calibration = 0
+            elif args.calibrating:
+                calibration = 1
+            try:
+                heading = math.ceil(args.heading % 360 * 0x10000 / 360)
+            except TypeError:
+                heading = 0
+            rc = run_bridge('emu-compass', qemu_port, extra_args=[str(heading), str(calibration)])
+            if rc != 0:
+                raise ToolError("Compass command failed (exit code {}).".format(rc))
+            return
+
         super(EmuCompassCommand, self).__call__(args)
         calibrated = QemuCompass.Calibration.Complete
         if args.uncalibrated:
@@ -234,6 +328,19 @@ class EmuTapCommand(PebbleCommand):
     valid_connections = {'qemu', 'emulator'}
 
     def __call__(self, args):
+        emulator_platform = getattr(args, 'emulator', None)
+        if emulator_platform:
+            BaseCommand.__call__(self, args)
+            from pebble_tool.bridge import run_bridge, ensure_bridge_qemu
+            qemu_port, _ = ensure_bridge_qemu(args)
+            axis_char = args.direction[0]
+            axis = BRIDGE_TAP_AXIS.get(axis_char, 0)
+            direction = 1 if args.direction.endswith('+') else -1
+            rc = run_bridge('emu-tap', qemu_port, extra_args=[str(axis), str(direction)])
+            if rc != 0:
+                raise ToolError("Tap command failed (exit code {}).".format(rc))
+            return
+
         super(EmuTapCommand, self).__call__(args)
         direction = 1 if args.direction.endswith('+') else -1
 
@@ -263,6 +370,17 @@ class EmuTimeFormatCommand(PebbleCommand):
     valid_connections = {'qemu', 'emulator'}
 
     def __call__(self, args):
+        emulator_platform = getattr(args, 'emulator', None)
+        if emulator_platform:
+            BaseCommand.__call__(self, args)
+            from pebble_tool.bridge import run_bridge, ensure_bridge_qemu
+            qemu_port, _ = ensure_bridge_qemu(args)
+            is_24h = '1' if args.format == '24h' else '0'
+            rc = run_bridge('emu-time-format', qemu_port, extra_args=[is_24h])
+            if rc != 0:
+                raise ToolError("Time format command failed (exit code {}).".format(rc))
+            return
+
         super(EmuTimeFormatCommand, self).__call__(args)
         if args.format == "24h":
             is_24_hour = True
@@ -286,6 +404,17 @@ class EmuSetTimelinePeekCommand(PebbleCommand):
     valid_connections = {'qemu', 'emulator'}
 
     def __call__(self, args):
+        emulator_platform = getattr(args, 'emulator', None)
+        if emulator_platform:
+            BaseCommand.__call__(self, args)
+            from pebble_tool.bridge import run_bridge, ensure_bridge_qemu
+            qemu_port, _ = ensure_bridge_qemu(args)
+            enabled = '1' if args.state == 'on' else '0'
+            rc = run_bridge('emu-set-timeline-peek', qemu_port, extra_args=[enabled])
+            if rc != 0:
+                raise ToolError("Timeline peek command failed (exit code {}).".format(rc))
+            return
+
         super(EmuSetTimelinePeekCommand, self).__call__(args)
         peek = (args.state == 'on')
         send_data_to_qemu(self.pebble.transport, QemuTimelinePeek(enabled=peek))
@@ -301,6 +430,21 @@ class EmuSetContentSizeCommand(PebbleCommand):
     valid_connections = {'qemu', 'emulator'}
 
     def __call__(self, args):
+        emulator_platform = getattr(args, 'emulator', None)
+        if emulator_platform:
+            BaseCommand.__call__(self, args)
+            from pebble_tool.bridge import run_bridge, ensure_bridge_qemu
+            qemu_port, _ = ensure_bridge_qemu(args)
+            if emulator_platform == 'emery' and args.size == 'small':
+                raise ToolError("Emery does not support the 'small' content size.")
+            elif emulator_platform != 'emery' and args.size == 'x-large':
+                raise ToolError("Only Emery supports the 'x-large' content size.")
+            size_val = BRIDGE_CONTENT_SIZE[args.size]
+            rc = run_bridge('emu-set-content-size', qemu_port, extra_args=[str(size_val)])
+            if rc != 0:
+                raise ToolError("Content size command failed (exit code {}).".format(rc))
+            return
+
         super(EmuSetContentSizeCommand, self).__call__(args)
         sizes = {
             'small': QemuContentSize.ContentSize.Small,
@@ -340,6 +484,14 @@ class EmuButtonCommand(PebbleCommand):
     }
 
     def __call__(self, args):
+        emulator_platform = getattr(args, 'emulator', None)
+        if emulator_platform:
+            BaseCommand.__call__(self, args)
+            from pebble_tool.bridge import run_bridge, ensure_bridge_qemu
+            qemu_port, _ = ensure_bridge_qemu(args)
+            self._call_bridge(args, qemu_port)
+            return
+
         super(EmuButtonCommand, self).__call__(args)
 
         # Handle 'release' action (no buttons needed)
@@ -369,6 +521,41 @@ class EmuButtonCommand(PebbleCommand):
                 send_data_to_qemu(self.pebble.transport, QemuButton(state=state))
                 time.sleep(args.duration / 1000.0)
                 send_data_to_qemu(self.pebble.transport, QemuButton(state=0))
+
+    def _call_bridge(self, args, qemu_port):
+        from pebble_tool.bridge import run_bridge
+
+        if args.action == 'release':
+            rc = run_bridge('emu-button', qemu_port, extra_args=['0'])
+            if rc != 0:
+                raise ToolError("Button release failed (exit code {}).".format(rc))
+            return
+
+        if not args.buttons:
+            raise ToolError("At least one button required for '{}' action.".format(args.action))
+
+        state = 0
+        for btn in args.buttons:
+            if btn not in BRIDGE_BUTTON_MAP:
+                raise ToolError("Invalid button '{}'. Valid buttons: back, up, select, down".format(btn))
+            state |= BRIDGE_BUTTON_MAP[btn]
+
+        for i in range(args.repeat):
+            if i > 0:
+                time.sleep(args.interval / 1000.0)
+
+            if args.action == 'push':
+                rc = run_bridge('emu-button', qemu_port, extra_args=[str(state)])
+                if rc != 0:
+                    raise ToolError("Button push failed (exit code {}).".format(rc))
+            elif args.action == 'click':
+                rc = run_bridge('emu-button', qemu_port, extra_args=[str(state)])
+                if rc != 0:
+                    raise ToolError("Button press failed (exit code {}).".format(rc))
+                time.sleep(args.duration / 1000.0)
+                rc = run_bridge('emu-button', qemu_port, extra_args=['0'])
+                if rc != 0:
+                    raise ToolError("Button release failed (exit code {}).".format(rc))
 
     @classmethod
     def add_parser(cls, parser):
