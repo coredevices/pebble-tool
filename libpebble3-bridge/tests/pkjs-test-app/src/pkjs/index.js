@@ -1,14 +1,17 @@
 // =============================================================================
-// PebbleKit JS API Test App
+// PebbleKit JS API Test App - Full API Coverage
 //
-// Exercises the full PKJS API surface in a real app pattern.
-// Each test logs PASS or FAIL with a descriptive name.
-// Run with the bridge's install-and-logs command to see results.
+// Tests every PKJS API with real implementations:
+//   - Tokens are deterministic SHA-256 hashes (not hardcoded)
+//   - WatchInfo comes from real negotiation data
+//   - Geolocation returns canned Palo Alto coords via SUCCESS callback
+//   - Notifications send real BlobDB packets to the watch
+//   - AppGlance sends real BlobDB packets to the watch
+//   - WebSocket makes real connections (falls back gracefully in container)
+//   - XHR makes real HTTP requests (falls back gracefully in container)
 //
-// Command keys from the watch:
-//   1 = weather/XHR test
-//   2 = config page test
-//   3 = timeline test
+// Run: java -jar build/libs/libpebble3-bridge-all.jar \
+//   install-and-logs <port> tests/pkjs-test-app/build/pkjs-test-app.pbw basalt
 // =============================================================================
 
 var testCount = 0;
@@ -59,23 +62,43 @@ Pebble.addEventListener('ready', function(e) {
     check('postMessage', typeof Pebble.postMessage === 'function');
 
     // ---------------------------------------------------------------------------
-    // 2. Tokens
+    // 2. Tokens (deterministic SHA-256 hashes, not hardcoded)
     // ---------------------------------------------------------------------------
     var acct = Pebble.getAccountToken();
-    check('getAccountToken value', typeof acct === 'string' && acct.length > 0, acct);
+    check('getAccountToken is 32-char hex', typeof acct === 'string' && acct.length === 32 &&
+          /^[0-9a-f]+$/.test(acct), acct);
     var watch = Pebble.getWatchToken();
-    check('getWatchToken value', typeof watch === 'string' && watch.length > 0, watch);
+    check('getWatchToken is 32-char hex', typeof watch === 'string' && watch.length === 32 &&
+          /^[0-9a-f]+$/.test(watch), watch);
+    check('account and watch tokens differ', acct !== watch);
+    // Tokens should be deterministic (same on repeat calls)
+    check('getAccountToken deterministic', Pebble.getAccountToken() === acct);
+    check('getWatchToken deterministic', Pebble.getWatchToken() === watch);
 
     // ---------------------------------------------------------------------------
-    // 3. WatchInfo
+    // 3. WatchInfo (from real negotiation data)
     // ---------------------------------------------------------------------------
     var info = Pebble.getActiveWatchInfo();
     check('watchInfo object', typeof info === 'object' && info !== null);
-    check('watchInfo.platform', typeof info.platform === 'string', info.platform);
-    check('watchInfo.model', typeof info.model === 'string', info.model);
-    check('watchInfo.language', typeof info.language === 'string', info.language);
-    check('watchInfo.firmware.major', typeof info.firmware === 'object' &&
-          typeof info.firmware.major === 'number', JSON.stringify(info.firmware));
+    check('watchInfo.platform is valid', typeof info.platform === 'string' &&
+          ['aplite','basalt','chalk','diorite','emery'].indexOf(info.platform) >= 0,
+          info.platform);
+    check('watchInfo.model contains platform', typeof info.model === 'string' &&
+          info.model.indexOf(info.platform) >= 0, info.model);
+    check('watchInfo.language', typeof info.language === 'string' && info.language.length >= 2,
+          info.language);
+    check('watchInfo.firmware object', typeof info.firmware === 'object');
+    check('watchInfo.firmware.major is number', typeof info.firmware.major === 'number' &&
+          info.firmware.major >= 1, 'major=' + info.firmware.major);
+    check('watchInfo.firmware.minor is number', typeof info.firmware.minor === 'number',
+          'minor=' + info.firmware.minor);
+    check('watchInfo.firmware.patch is number', typeof info.firmware.patch === 'number',
+          'patch=' + info.firmware.patch);
+    check('watchInfo.firmware.suffix is string', typeof info.firmware.suffix === 'string',
+          'suffix=' + JSON.stringify(info.firmware.suffix));
+    // Deterministic
+    check('getActiveWatchInfo deterministic', JSON.stringify(Pebble.getActiveWatchInfo()) ===
+          JSON.stringify(info));
 
     // ---------------------------------------------------------------------------
     // 4. localStorage
@@ -131,8 +154,9 @@ Pebble.addEventListener('ready', function(e) {
     // ---------------------------------------------------------------------------
     Pebble.openURL('https://example.com/config');
     pass('openURL no crash');
+    // showSimpleNotificationOnPebble now sends a real BlobDB notification
     Pebble.showSimpleNotificationOnPebble('Hello', 'World');
-    pass('showSimpleNotificationOnPebble no crash');
+    pass('showSimpleNotificationOnPebble queued real notification');
     Pebble.showToast('test toast');
     pass('showToast no crash');
     Pebble.postMessage({msg: 'hello rocky'});
@@ -159,11 +183,12 @@ Pebble.addEventListener('ready', function(e) {
     );
 
     // ---------------------------------------------------------------------------
-    // 10. getTimelineToken
+    // 10. getTimelineToken (deterministic hash)
     // ---------------------------------------------------------------------------
     Pebble.getTimelineToken(
         function(token) {
-            check('getTimelineToken success', typeof token === 'string' && token.length > 0,
+            check('getTimelineToken is 32-char hex',
+                  typeof token === 'string' && token.length === 32 && /^[0-9a-f]+$/.test(token),
                   'token=' + token);
         },
         function() { fail('getTimelineToken failure cb'); }
@@ -196,12 +221,12 @@ Pebble.addEventListener('ready', function(e) {
     );
 
     // ---------------------------------------------------------------------------
-    // 12. appGlanceReload
+    // 12. appGlanceReload (sends real BlobDB packet)
     // ---------------------------------------------------------------------------
     Pebble.appGlanceReload(
         [{layout: {icon: 'system://images/GENERIC_WARNING',
                    subtitleTemplateString: 'Test glance'}}],
-        function(s) { pass('appGlanceReload success'); },
+        function(s) { pass('appGlanceReload success (sent BlobDB)'); },
         function()  { fail('appGlanceReload failure'); }
     );
 
@@ -218,7 +243,7 @@ Pebble.addEventListener('ready', function(e) {
     xhr.abort();
     check('XHR.abort sets readyState=0', xhr.readyState === 0);
 
-    // XHR network test (may fail in container due to DNS)
+    // XHR real network test (may fail in container due to DNS)
     var xhrGet = new XMLHttpRequest();
     xhrGet.onload = function() {
         check('XHR GET succeeds', this.status === 200, 'status=' + this.status);
@@ -246,34 +271,80 @@ Pebble.addEventListener('ready', function(e) {
     xhrPost.send(JSON.stringify({test: true}));
 
     // ---------------------------------------------------------------------------
-    // 14. navigator.geolocation
+    // 14. navigator.geolocation (canned Palo Alto coords via SUCCESS callback)
     // ---------------------------------------------------------------------------
     check('navigator.geolocation exists', typeof navigator.geolocation === 'object');
     navigator.geolocation.getCurrentPosition(
-        function(pos) { pass('geolocation success cb', 'lat=' + pos.coords.latitude); },
+        function(pos) {
+            check('geolocation SUCCESS callback fires', true);
+            check('geolocation coords.latitude', typeof pos.coords.latitude === 'number' &&
+                  Math.abs(pos.coords.latitude - 37.4419) < 0.01,
+                  'lat=' + pos.coords.latitude);
+            check('geolocation coords.longitude', typeof pos.coords.longitude === 'number' &&
+                  Math.abs(pos.coords.longitude - (-122.143)) < 0.01,
+                  'lon=' + pos.coords.longitude);
+            check('geolocation coords.altitude', typeof pos.coords.altitude === 'number',
+                  'alt=' + pos.coords.altitude);
+            check('geolocation coords.accuracy', typeof pos.coords.accuracy === 'number' &&
+                  pos.coords.accuracy > 0, 'acc=' + pos.coords.accuracy);
+            check('geolocation timestamp', typeof pos.timestamp === 'number' &&
+                  pos.timestamp > 1000000000000, 'ts=' + pos.timestamp);
+        },
         function(err) {
-            check('geolocation error cb (bridge mode)', err.code === 2,
-                  'code=' + err.code + ' ' + err.message);
+            fail('geolocation should not call error cb', err.message);
         }
     );
-    var wid = navigator.geolocation.watchPosition(function(){}, function(){});
-    check('watchPosition returns id', typeof wid === 'number');
+
+    // watchPosition also returns canned coords
+    var watchFired = false;
+    var wid = navigator.geolocation.watchPosition(
+        function(pos) {
+            if (!watchFired) {
+                watchFired = true;
+                check('watchPosition success fires', true);
+                check('watchPosition has coords', typeof pos.coords.latitude === 'number',
+                      'lat=' + pos.coords.latitude);
+            }
+        },
+        function() {}
+    );
+    check('watchPosition returns id', typeof wid === 'number' && wid > 0, 'id=' + wid);
     navigator.geolocation.clearWatch(wid);
     pass('clearWatch no crash');
 
     // ---------------------------------------------------------------------------
-    // 15. WebSocket (stub)
+    // 15. WebSocket (real connections via Java, falls back on DNS error)
     // ---------------------------------------------------------------------------
     check('WebSocket constructor', typeof WebSocket === 'function');
-    check('WebSocket static constants', WebSocket.CLOSED === 3 && WebSocket.OPEN === 1);
-    var ws = new WebSocket('wss://echo.example.com');
-    check('WebSocket readyState=CLOSED', ws.readyState === 3);
-    ws.onclose = function(e) {
-        check('WebSocket onclose fires', e.code === 1006);
+    check('WebSocket static constants', WebSocket.CLOSED === 3 && WebSocket.OPEN === 1 &&
+          WebSocket.CONNECTING === 0 && WebSocket.CLOSING === 2);
+
+    var ws = new WebSocket('wss://echo.websocket.org');
+    check('WebSocket initial readyState=CONNECTING', ws.readyState === 0);
+    check('WebSocket.url', ws.url === 'wss://echo.websocket.org');
+    check('WebSocket instance constants', ws.CONNECTING === 0 && ws.OPEN === 1 &&
+          ws.CLOSING === 2 && ws.CLOSED === 3);
+    ws.onopen = function(e) {
+        pass('WebSocket onopen fires (real connection!)');
+        ws.send('echo test');
+    };
+    ws.onmessage = function(e) {
+        check('WebSocket onmessage fires', e.data === 'echo test', 'data=' + e.data);
+        ws.close(1000, 'done');
     };
     ws.onerror = function(e) {
-        pass('WebSocket onerror fires');
+        // Expected in container with no DNS
+        console.warn('WebSocket error (expected in container): ' + (e.message || 'connection failed'));
     };
+    ws.onclose = function(e) {
+        check('WebSocket onclose fires', typeof e.code === 'number', 'code=' + e.code);
+    };
+
+    // Test WebSocket.close() method
+    var ws2 = new WebSocket('wss://example.com/test');
+    check('WebSocket close method exists', typeof ws2.close === 'function');
+    ws2.onerror = function() {};
+    ws2.onclose = function() {};
 
     // ---------------------------------------------------------------------------
     // 16. Console methods
@@ -292,7 +363,6 @@ Pebble.addEventListener('ready', function(e) {
         check('showConfiguration fires', e.type === 'showConfiguration');
         Pebble.openURL('https://example.com/config?color=blue');
         pass('showConfiguration calls openURL');
-        // Report to watch
         Pebble.sendAppMessage({'Status': 'Config opened'});
     });
 
@@ -303,7 +373,6 @@ Pebble.addEventListener('ready', function(e) {
         try {
             var cfg = JSON.parse(decodeURIComponent(e.response));
             check('webviewclosed parses config', cfg !== null, JSON.stringify(cfg));
-            // Save config
             localStorage.setItem('bgColor', cfg.bgColor || 'black');
             Pebble.sendAppMessage({'Status': 'Config: ' + (cfg.bgColor || 'default')});
         } catch(ex) {
@@ -330,29 +399,27 @@ Pebble.addEventListener('appmessage', function(e) {
     var cmd = e.payload['0'] || e.payload[0];
 
     if (cmd === 1) {
-        // Weather test - use geolocation + XHR pattern
+        // Weather test using real geolocation
         console.log('CMD 1: Weather request');
         navigator.geolocation.getCurrentPosition(
             function(pos) {
-                // Won't fire in bridge mode
-                pass('weather geolocation success');
-            },
-            function(err) {
-                // Expected in bridge mode - send mock data
-                pass('weather geolocation fallback');
+                check('weather geolocation success', typeof pos.coords.latitude === 'number',
+                      'lat=' + pos.coords.latitude + ' lon=' + pos.coords.longitude);
+                // Send weather data using the real coords
                 Pebble.sendAppMessage(
-                    {'Temperature': 22, 'City': 'MockCity', 'Status': 'Sunny'},
+                    {'Temperature': 22, 'City': 'Palo Alto', 'Status': 'Sunny'},
                     function() { pass('weather sendAppMessage with string keys'); },
                     function(d, e) { fail('weather sendAppMessage', e); }
                 );
+            },
+            function(err) {
+                fail('weather geolocation error', err.message);
             }
         );
 
     } else if (cmd === 2) {
-        // Config test - simulate showConfiguration + webviewclosed
+        // Config test
         console.log('CMD 2: Config test');
-        // In a real app the mobile app triggers these; here we just
-        // acknowledge the request.
         Pebble.sendAppMessage({'Status': 'Config test OK'});
         pass('config command handled');
 
@@ -360,7 +427,7 @@ Pebble.addEventListener('appmessage', function(e) {
         // Timeline test
         console.log('CMD 3: Timeline test');
         Pebble.getTimelineToken(function(token) {
-            check('timeline token from cmd', token.length > 0, token);
+            check('timeline token from cmd', token.length === 32 && /^[0-9a-f]+$/.test(token), token);
             Pebble.sendAppMessage({'Status': 'TL:' + token.substring(0, 10)});
         });
 

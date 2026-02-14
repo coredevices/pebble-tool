@@ -223,6 +223,24 @@ class QemuBridge(private val port: Int) {
     private lateinit var output: OutputStream
     @Volatile private var connected = false
 
+    /** Watch info collected during negotiation */
+    var watchPlatform: String = "basalt"
+        private set
+    var watchModel: String = "qemu_platform_basalt"
+        private set
+    var watchLanguage: String = "en_US"
+        private set
+    var watchFwMajor: Int = 4
+        private set
+    var watchFwMinor: Int = 4
+        private set
+    var watchFwPatch: Int = 0
+        private set
+    var watchFwSuffix: String = ""
+        private set
+    var watchSerial: String = "QEMU00000000"
+        private set
+
     fun connect() {
         System.err.println("[bridge] Connecting to QEMU on localhost:$port...")
         socket = Socket("localhost", port)
@@ -398,7 +416,26 @@ class QemuBridge(private val port: Int) {
                 if (packet != null) {
                     if (packet.endpoint == ProtocolEndpoint.WATCH_VERSION) {
                         if (packet is WatchVersion.WatchVersionResponse) {
-                            System.err.println("[bridge] Watch firmware: ${packet.running.versionTag.get()}")
+                            val versionTag = packet.running.versionTag.get()
+                            System.err.println("[bridge] Watch firmware: $versionTag")
+
+                            // Extract real watch info from the response
+                            val hwPlatform = io.rebble.libpebblecommon.metadata.WatchHardwarePlatform
+                                .fromProtocolNumber(packet.running.hardwarePlatform.get())
+                            watchPlatform = hwPlatform.watchType.codename
+                            watchModel = "qemu_platform_${watchPlatform}"
+                            watchSerial = packet.serial.get().ifEmpty { "QEMU00000000" }
+                            val langRaw = packet.language.get()
+                            if (langRaw.isNotEmpty()) watchLanguage = langRaw
+
+                            // Parse firmware version from tag like "v4.9.77-3-geb9f6e61"
+                            val vMatch = Regex("""v?(\d+)\.(\d+)\.?(\d*)(.*)""").find(versionTag)
+                            if (vMatch != null) {
+                                watchFwMajor = vMatch.groupValues[1].toIntOrNull() ?: 4
+                                watchFwMinor = vMatch.groupValues[2].toIntOrNull() ?: 0
+                                watchFwPatch = vMatch.groupValues[3].toIntOrNull() ?: 0
+                                watchFwSuffix = vMatch.groupValues[4]
+                            }
                         }
                         System.err.println("[bridge] Negotiation complete.")
                         socket.soTimeout = 0
