@@ -1,0 +1,25 @@
+{
+  "name": "pkjs-api-test",
+  "author": "Test",
+  "version": "1.0.0",
+  "pebble": {
+    "displayName": "PKJS API Test",
+    "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "sdkVersion": "3",
+    "enableMultiJS": false,
+    "targetPlatforms": ["basalt"],
+    "watchapp": {
+      "watchface": false
+    },
+    "messageKeys": {
+      "Command": 0,
+      "Temperature": 1,
+      "City": 2,
+      "Status": 3
+    },
+    "resources": {
+      "media": []
+    },
+    "capabilities": ["location", "configurable"]
+  }
+}
