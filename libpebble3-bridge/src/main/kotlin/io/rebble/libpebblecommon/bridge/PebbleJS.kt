@@ -50,7 +50,6 @@ class PebbleJS(
     private val appKeys: Map<String, Int> = emptyMap()
 ) {
     private var jsContext: JsContext? = null
-    private var nextTransactionId: UByte = 1u
     /** Active WebSocket connections managed on the Kotlin side */
     private val webSockets = mutableMapOf<Int, JavaWebSocket>()
     private var nextWsId = 1
@@ -1048,7 +1047,8 @@ class PebbleJS(
             for (msg in msgs) {
                 val obj = msg.jsonObject
                 val dict = obj["dict"]?.jsonObject ?: continue
-                sendAppMessageFromJson(dict)
+                val txId = obj["txId"]?.jsonPrimitive?.int?.toUByte()
+                sendAppMessageFromJson(dict, txId)
             }
         } catch (e: Exception) {
             System.err.println("[pkjs] Error draining AppMessages: ${e.message}")
@@ -1319,7 +1319,7 @@ class PebbleJS(
         }
     }
 
-    private fun sendAppMessageFromJson(dict: JsonObject) {
+    private fun sendAppMessageFromJson(dict: JsonObject, jsTxId: UByte? = null) {
         try {
             val tuples = mutableListOf<AppMessageTuple>()
 
@@ -1352,8 +1352,8 @@ class PebbleJS(
                 tuples.add(tuple)
             }
 
-            val txId = nextTransactionId
-            nextTransactionId = ((nextTransactionId.toInt() + 1) % 256).toUByte()
+            // Use the JS-generated txId to match what the JS success callback expects
+            val txId = jsTxId ?: 0u.toUByte()
 
             val push = AppMessage.AppMessagePush(
                 transactionId = txId,
@@ -1361,7 +1361,7 @@ class PebbleJS(
                 tuples = tuples
             )
             bridge.sendPacket(push)
-            System.err.println("[pkjs] Sent AppMessage with ${tuples.size} tuples")
+            System.err.println("[pkjs] Sent AppMessage with ${tuples.size} tuples (txId=$txId)")
         } catch (e: Exception) {
             System.err.println("[pkjs] Failed to send AppMessage: ${e.message}")
         }
