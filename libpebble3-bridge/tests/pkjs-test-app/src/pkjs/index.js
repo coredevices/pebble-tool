@@ -10,7 +10,7 @@
 //   - XHR → real HTTP to Open-Meteo API → parse response → send to watch
 //   - Geolocation → coords → used in XHR → verified by weather response
 //   - showConfiguration/webviewclosed → triggered → openURL queued → verified
-//   - All internal queues verified (not just "no crash")
+//   - All consolidated event queue entries verified (not just "no crash")
 //
 // The C app auto-sends CMD 1 (1s), CMD 2 (5s), CMD 3 (8s), and echoes
 // back every received message via E2EAck key, so JS can verify the
@@ -146,33 +146,46 @@ Pebble.addEventListener('ready', function(e) {
     // spyCalled will be checked after real appmessage fires (in section 18)
 
     // ---------------------------------------------------------------------------
-    // 7. openURL - verify URL queued in internal queue
+    // Helper: query consolidated event queue by type
     // ---------------------------------------------------------------------------
-    var urlCountBefore = _pkjsOpenURLs.length;
+    function eventsOfType(t) {
+        return _pkjsEvents.filter(function(e) { return e.t === t; });
+    }
+    function lastEventOfType(t) {
+        var evts = eventsOfType(t);
+        return evts.length > 0 ? evts[evts.length - 1] : null;
+    }
+
+    // ---------------------------------------------------------------------------
+    // 7. openURL - verify URL queued in consolidated event queue
+    // ---------------------------------------------------------------------------
+    var urlCountBefore = eventsOfType('url').length;
     Pebble.openURL('https://example.com/config');
-    check('openURL queues URL', _pkjsOpenURLs.length === urlCountBefore + 1 &&
-          _pkjsOpenURLs[_pkjsOpenURLs.length - 1] === 'https://example.com/config');
+    var lastUrl = lastEventOfType('url');
+    check('openURL queues URL', eventsOfType('url').length === urlCountBefore + 1 &&
+          lastUrl && lastUrl.url === 'https://example.com/config');
 
     // ---------------------------------------------------------------------------
     // 8. showSimpleNotificationOnPebble - verify queued + BlobDB sends to watch
-    // (bridge will log E2E_BLOBDB_RESPONSE: Success when watch accepts it)
     // ---------------------------------------------------------------------------
-    var notifCountBefore = _pkjsNotifications.length;
+    var notifCountBefore = eventsOfType('notif').length;
     Pebble.showSimpleNotificationOnPebble('E2E Test', 'Notification body');
+    var lastNotif = lastEventOfType('notif');
     check('notification queued with title',
-          _pkjsNotifications.length === notifCountBefore + 1 &&
-          _pkjsNotifications[_pkjsNotifications.length - 1].title === 'E2E Test');
+          eventsOfType('notif').length === notifCountBefore + 1 &&
+          lastNotif && lastNotif.title === 'E2E Test');
     check('notification queued with body',
-          _pkjsNotifications[_pkjsNotifications.length - 1].body === 'Notification body');
+          lastNotif && lastNotif.body === 'Notification body');
 
     // ---------------------------------------------------------------------------
     // 9. showToast - verify toast message logged
     // ---------------------------------------------------------------------------
-    var logCountBefore = _pkjsLogs.length;
+    var logCountBefore = eventsOfType('log').length;
     Pebble.showToast('E2E toast 123');
     var foundToast = false;
-    for (var i = logCountBefore; i < _pkjsLogs.length; i++) {
-        if (_pkjsLogs[i].msg && _pkjsLogs[i].msg.indexOf('Toast: E2E toast 123') >= 0) {
+    var logs = eventsOfType('log');
+    for (var i = logCountBefore; i < logs.length; i++) {
+        if (logs[i].msg && logs[i].msg.indexOf('Toast: E2E toast 123') >= 0) {
             foundToast = true; break;
         }
     }
@@ -181,12 +194,13 @@ Pebble.addEventListener('ready', function(e) {
     // ---------------------------------------------------------------------------
     // 10. postMessage - verify message data logged
     // ---------------------------------------------------------------------------
-    logCountBefore = _pkjsLogs.length;
+    logCountBefore = eventsOfType('log').length;
     Pebble.postMessage({msg: 'hello rocky', val: 42});
     var foundPost = false;
-    for (var i = logCountBefore; i < _pkjsLogs.length; i++) {
-        if (_pkjsLogs[i].msg && _pkjsLogs[i].msg.indexOf('postMessage:') >= 0 &&
-            _pkjsLogs[i].msg.indexOf('hello rocky') >= 0) {
+    logs = eventsOfType('log');
+    for (var i = logCountBefore; i < logs.length; i++) {
+        if (logs[i].msg && logs[i].msg.indexOf('postMessage:') >= 0 &&
+            logs[i].msg.indexOf('hello rocky') >= 0) {
             foundPost = true; break;
         }
     }
@@ -195,7 +209,7 @@ Pebble.addEventListener('ready', function(e) {
     // ---------------------------------------------------------------------------
     // 11. sendAppMessage - verify queued + key resolution
     // ---------------------------------------------------------------------------
-    var outboxBefore = _pkjsOutbox.length;
+    var outboxBefore = eventsOfType('msg').length;
     var tx1 = Pebble.sendAppMessage({3: 'JS is ready'},
         function(d) {
             check('sendAppMessage ack callback', typeof d.transactionId === 'number',
@@ -204,15 +218,16 @@ Pebble.addEventListener('ready', function(e) {
         function(d, err) { fail('sendAppMessage ack', err); }
     );
     check('sendAppMessage returns txId', typeof tx1 === 'number' && tx1 > 0, 'tx=' + tx1);
-    check('sendAppMessage queues outbox', _pkjsOutbox.length === outboxBefore + 1);
-    check('sendAppMessage resolves numeric key', _pkjsOutbox[_pkjsOutbox.length - 1].dict[3] === 'JS is ready');
+    var msgs = eventsOfType('msg');
+    check('sendAppMessage queues outbox', msgs.length === outboxBefore + 1);
+    check('sendAppMessage resolves numeric key', msgs[msgs.length - 1].dict[3] === 'JS is ready');
 
-    outboxBefore = _pkjsOutbox.length;
+    outboxBefore = eventsOfType('msg').length;
     Pebble.sendAppMessage({'Status': 'key-test-ok'},
         function() { pass('sendAppMessage string appKey ack'); },
         function(d, err) { fail('sendAppMessage string appKey', err); }
     );
-    check('sendAppMessage string key resolves', _pkjsOutbox.length === outboxBefore + 1);
+    check('sendAppMessage string key resolves', eventsOfType('msg').length === outboxBefore + 1);
 
     // ---------------------------------------------------------------------------
     // 12. getTimelineToken (deterministic hash via async callback)
@@ -267,7 +282,7 @@ Pebble.addEventListener('ready', function(e) {
     // ---------------------------------------------------------------------------
     // 14. appGlanceReload - verify queue + callback + BlobDB sends to watch
     // ---------------------------------------------------------------------------
-    var glanceBefore = _pkjsAppGlances.length;
+    var glanceBefore = eventsOfType('glance').length;
     Pebble.appGlanceReload(
         [{layout: {icon: 'system://images/GENERIC_WARNING',
                    subtitleTemplateString: 'E2E glance test'}}],
@@ -278,9 +293,10 @@ Pebble.addEventListener('ready', function(e) {
         },
         function() { fail('appGlanceReload failure'); }
     );
-    check('appGlanceReload queues glance', _pkjsAppGlances.length === glanceBefore + 1);
+    var glances = eventsOfType('glance');
+    check('appGlanceReload queues glance', glances.length === glanceBefore + 1);
     check('appGlanceReload queue data correct',
-          _pkjsAppGlances[_pkjsAppGlances.length - 1].slices[0].layout.icon ===
+          glances[glances.length - 1].slices[0].layout.icon ===
           'system://images/GENERIC_WARNING');
 
     // ---------------------------------------------------------------------------
@@ -429,15 +445,16 @@ Pebble.addEventListener('ready', function(e) {
     // ---------------------------------------------------------------------------
     // 18. Console methods - verify all 5 levels captured
     // ---------------------------------------------------------------------------
-    logCountBefore = _pkjsLogs.length;
+    logCountBefore = eventsOfType('log').length;
     console.log('c.log');
     console.info('c.info');
     console.warn('c.warn');
     console.error('c.error');
     console.debug('c.debug');
     var levels = {};
-    for (var i = logCountBefore; i < _pkjsLogs.length; i++) {
-        levels[_pkjsLogs[i].level] = true;
+    logs = eventsOfType('log');
+    for (var i = logCountBefore; i < logs.length; i++) {
+        levels[logs[i].level] = true;
     }
     check('console.log captured', levels['log'] === true);
     check('console.info captured', levels['info'] === true);
@@ -456,7 +473,7 @@ Pebble.addEventListener('ready', function(e) {
         showConfigFired = true;
         check('showConfiguration event type', e.type === 'showConfiguration');
         Pebble.openURL('https://example.com/config?color=blue');
-        configOpenURL = _pkjsOpenURLs[_pkjsOpenURLs.length - 1];
+        configOpenURL = lastEventOfType('url') ? lastEventOfType('url').url : null;
     });
 
     Pebble.addEventListener('webviewclosed', function(e) {
