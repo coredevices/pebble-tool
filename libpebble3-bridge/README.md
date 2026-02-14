@@ -33,13 +33,14 @@ The bridge communicates with QEMU using QemuSPP framing and implements the full 
 
 ### PKJS Design
 
-Since the Boa engine is accessed via UniFFI (no direct native callbacks from JS to Kotlin), the PKJS layer uses a **polling/queue** pattern:
+Since the Boa engine is accessed via UniFFI (no direct native callbacks from JS to Kotlin), the PKJS layer uses a **consolidated event queue** pattern:
 
-- A **JS bootstrap polyfill** defines the `Pebble` object, `localStorage`, `XMLHttpRequest`, and timer functions
-- When JS calls `Pebble.sendAppMessage()`, the message is pushed to a JS-side queue (`_pkjsOutbox`)
-- Kotlin periodically calls `eval()` to drain these queues and send actual AppMessages to the watch
+- A **JS bootstrap polyfill** defines the `Pebble` object, `localStorage`, `XMLHttpRequest`, `WebSocket`, `navigator.geolocation`, and timer functions
+- All outgoing JS events (AppMessages, logs, notifications, etc.) are pushed to a single typed queue (`_pkjsEvents`)
+- Kotlin periodically calls `eval()` to drain this queue and dispatch events to the appropriate handlers
 - Events (ready, appmessage, etc.) are fired from Kotlin into JS via `eval("_pkjsFireEvent(...)")`
 - HTTP requests from `XMLHttpRequest` use the Boa engine's native `fetch()`, which delegates to a `JsFetcher` implementation backed by `HttpURLConnection`
+- The `--location` CLI flag allows configuring geolocation coordinates (defaults to IP-based lookup or Palo Alto fallback)
 
 ## Prerequisites
 
@@ -50,12 +51,31 @@ Since the Boa engine is accessed via UniFFI (no direct native callbacks from JS 
 ## Building
 
 ```bash
-# Build the fat JAR (includes all dependencies + native library)
-cd libpebble3-bridge
-gradle shadowJar
+# First time: initialize submodules and sync libpebble3 source
+git submodule update --init --recursive
+./sync_and_build.sh
+
+# Or step by step:
+./sync_and_build.sh --sync    # Sync libpebble3 source from submodule
+./sync_and_build.sh --build   # Build the fat JAR only
 
 # Output: build/libs/libpebble3-bridge-all.jar
+# Copied to: pebble_tool/bridge/libpebble3-bridge-all.jar
 ```
+
+### Source file origins
+
+The Kotlin source tree contains files from multiple origins:
+
+| Origin | Path | Regeneration |
+|--------|------|-------------|
+| **Bridge (custom)** | `bridge/Main.kt`, `bridge/PebbleJS*.kt` | Hand-written, not synced |
+| **libpebble3 (submodule)** | `packets/`, `protocolhelpers/`, `structmapper/`, `metadata/`, `exceptions/` | `./sync_and_build.sh --sync` |
+| **Picaros (UniFFI)** | `uniffi/library_rs/library_rs.kt` | See "Rebuilding the Picaros native library" |
+| **JVM platform** | `util/DataBuffer.kt`, `co/touchlab/kermit/Logger.kt` | Hand-written platform stubs |
+
+The synced and generated files are listed in `.gitignore` and should not be committed.
+To regenerate after updating the submodule: `./sync_and_build.sh --sync`.
 
 ## Usage
 
@@ -240,15 +260,24 @@ gradle shadowJar
 libpebble3-bridge/
 ├── build.gradle.kts                          # Gradle build (JNA, kotlinx deps)
 ├── settings.gradle.kts                       # Gradle settings
+├── sync_and_build.sh                        # Sync libpebble3 source + build JAR
 ├── src/main/
 │   ├── kotlin/
 │   │   ├── io/rebble/libpebblecommon/bridge/
 │   │   │   ├── Main.kt                      # CLI entry point + QemuBridge
-│   │   │   └── PebbleJS.kt                  # PKJS runtime (Picaros + JS polyfill)
+│   │   │   ├── PebbleJS.kt                  # PKJS runtime orchestrator
+│   │   │   ├── PebbleJSBootstrap.kt        # JS polyfill generation
+│   │   │   ├── PebbleJSWebSocket.kt        # WebSocket connection management
+│   │   │   ├── PebbleJSHttpFetcher.kt      # HTTP proxy + JsFetcher
+│   │   │   └── PebbleJSBlobDB.kt           # BlobDB notification + glance
 │   │   └── uniffi/library_rs/
-│   │       └── library_rs.kt                # Generated UniFFI/JNA bindings
+│   │       └── library_rs.kt                # Generated UniFFI/JNA bindings (not committed)
 │   └── resources/
 │       └── linux-x86-64/
-│           └── liblibrary_rs.so             # Prebuilt Boa native library
+│           └── liblibrary_rs.so             # Picaros native library (not committed)
+├── tests/
+│   ├── run-e2e-test.sh                      # PKJS + watch round-trip E2E tests
+│   ├── run-full-e2e-test.sh                 # Comprehensive bridge E2E tests
+│   └── pkjs-test-app/                       # Test PBW app for E2E suite
 └── README.md
 ```

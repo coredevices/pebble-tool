@@ -1,2 +1,19 @@
 build/
 .gradle/
+
+# UniFFI-generated bindings - regenerate from picaros source
+# See README.md "Rebuilding the Picaros native library" section
+src/main/kotlin/uniffi/library_rs/library_rs.kt
+
+# Prebuilt native library - build from picaros source
+src/main/resources/linux-x86-64/liblibrary_rs.so
+
+# Synced libpebble3 source files - regenerate via sync_and_build.sh --sync
+# These are copied from third_party/mobileapp submodule
+src/main/kotlin/io/rebble/libpebblecommon/packets/
+src/main/kotlin/io/rebble/libpebblecommon/protocolhelpers/
+src/main/kotlin/io/rebble/libpebblecommon/structmapper/
+src/main/kotlin/io/rebble/libpebblecommon/metadata/
+src/main/kotlin/io/rebble/libpebblecommon/util/Endian.kt
+src/main/kotlin/io/rebble/libpebblecommon/exceptions/
+src/main/kotlin/coredev/GenerateRoomEntity.kt

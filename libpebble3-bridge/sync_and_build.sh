@@ -10,6 +10,12 @@
 #   - Java 21+ (for Kotlin compilation)
 #   - Gradle 8.x (or use the gradle wrapper if available)
 #   - git submodule initialized: git submodule update --init third_party/mobileapp
+#
+# NOTE: Synced source files and build outputs are in .gitignore and should not
+# be committed. The sync step exists because libpebble3's BlobDB.kt uses
+# kotlin.time.Instant which is not available on JVM-only builds; the patch
+# replaces it with UInt. Once libpebble3 upstream accepts both Instant and
+# UInt, this script can be replaced with a Gradle srcDir() directive.
 
 set -euo pipefail
 

@@ -58,12 +58,13 @@ fun main(args: Array<String>) {
             bridge.streamLogs()
         }
         "install-and-logs" -> {
-            requireArgs(args, 4, "install-and-logs <qemu_port> <pbw_path> <platform>")
+            requireArgs(args, 4, "install-and-logs <qemu_port> <pbw_path> <platform> [--location LAT,LON|auto]")
+            val locationArg = parseLocationArg(args)
             val bridge = QemuBridge(args[1].toInt())
             bridge.connect()
             bridge.negotiate()
             bridge.installApp(args[2], args[3])
-            bridge.streamLogsWithPKJS(args[2], args[3])
+            bridge.streamLogsWithPKJS(args[2], args[3], locationArg)
         }
         "ping" -> {
             requireArgs(args, 2, "ping <qemu_port>")
@@ -199,13 +200,55 @@ fun requireArgs(args: Array<String>, min: Int, usage: String) {
     }
 }
 
+/**
+ * Parse --location argument from args array.
+ * Supports: --location LAT,LON (e.g. --location 51.5074,-0.1278)
+ *           --location auto (query IP geolocation API)
+ * Returns Pair(lat, lon) or null if not specified.
+ */
+fun parseLocationArg(args: Array<String>): Pair<Double, Double>? {
+    val idx = args.indexOf("--location")
+    if (idx < 0 || idx + 1 >= args.size) return null
+    val value = args[idx + 1]
+    if (value == "auto") {
+        // Query IP geolocation API for approximate location
+        return try {
+            val conn = java.net.URI("http://ip-api.com/json/?fields=lat,lon").toURL()
+                .openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            val body = conn.inputStream.bufferedReader().readText()
+            val json = kotlinx.serialization.json.Json.parseToJsonElement(body).jsonObject
+            val lat = json["lat"]?.jsonPrimitive?.double
+            val lon = json["lon"]?.jsonPrimitive?.double
+            if (lat != null && lon != null) {
+                System.err.println("[bridge] Auto-detected location: $lat, $lon")
+                Pair(lat, lon)
+            } else null
+        } catch (e: Exception) {
+            System.err.println("[bridge] Failed to auto-detect location: ${e.message}")
+            null
+        }
+    }
+    // Parse LAT,LON format
+    val parts = value.split(",")
+    if (parts.size == 2) {
+        val lat = parts[0].toDoubleOrNull()
+        val lon = parts[1].toDoubleOrNull()
+        if (lat != null && lon != null) return Pair(lat, lon)
+    }
+    System.err.println("[bridge] Invalid --location format: $value (use LAT,LON or auto)")
+    return null
+}
+
 fun printUsage() {
     System.err.println("""
         libpebble3-bridge - Pebble emulator bridge using libpebble3 protocol
 
         Protocol Commands (require negotiation):
           install <port> <pbw> <platform>              Install app
-          install-and-logs <port> <pbw> <platform>     Install app and stream logs (with PKJS)
+          install-and-logs <port> <pbw> <platform> [--location LAT,LON|auto]
+                                                       Install app and stream logs (with PKJS)
           logs <port>                                    Stream logs
           ping <port>                                    Test connectivity
           screenshot <port>                              Capture screenshot (JSON on stdout)
@@ -735,7 +778,7 @@ class QemuBridge(private val port: Int) {
      * Stream logs with PKJS support. Extracts pebble-js-app.js from PBW
      * and runs it using Picaros (Boa engine), handling AppMessage bidirectionally.
      */
-    fun streamLogsWithPKJS(pbwPath: String, platform: String) {
+    fun streamLogsWithPKJS(pbwPath: String, platform: String, location: Pair<Double, Double>? = null) {
         System.err.println("[bridge] Streaming logs with PKJS support (Ctrl+C to stop)...")
         enableAppLogShipping()
 
@@ -771,7 +814,12 @@ class QemuBridge(private val port: Int) {
                     System.err.println("[bridge] Could not read appKeys: ${e.message}")
                 }
 
-                pkjs = PebbleJS(this, jsSource, meta.uuid, appKeys)
+                val geoLat = location?.first ?: 37.4419
+                val geoLon = location?.second ?: -122.1430
+                if (location == null) {
+                    System.err.println("[bridge] No --location specified, using default (Palo Alto: 37.4419, -122.1430)")
+                }
+                pkjs = PebbleJS(this, jsSource, meta.uuid, appKeys, geoLat, geoLon)
                 pkjs.start()
                 System.err.println("[bridge] PKJS runtime started for ${meta.appName} (from ${jsEntry.name})")
             } else {
