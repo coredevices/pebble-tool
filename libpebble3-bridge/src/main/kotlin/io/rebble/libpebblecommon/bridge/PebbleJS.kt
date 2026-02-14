@@ -229,8 +229,8 @@ class PebbleJS(
     /**
      * JavaScript bootstrap that defines the Pebble API, localStorage,
      * XMLHttpRequest, WebSocket, geolocation, and timer functions.
-     * Outgoing messages from JS are queued in internal arrays for
-     * Kotlin to drain via eval().
+     * Outgoing messages from JS are queued in a single consolidated
+     * _pkjsEvents array, drained via one eval() call per poll cycle.
      */
     private fun buildBootstrapJS(): String {
         // Compute deterministic tokens from watch serial + app UUID
@@ -238,13 +238,10 @@ class PebbleJS(
         val watchToken = deterministicToken("watch:${bridge.watchSerial}:$appUuid")
 
         return """
-        // ========== Internal queues ==========
-        var _pkjsOutbox = [];        // outgoing AppMessage queue
-        var _pkjsLogs = [];          // console log queue
-        var _pkjsOpenURLs = [];      // openURL calls
-        var _pkjsNotifications = []; // notification calls
-        var _pkjsAppGlances = [];    // appGlanceReload calls
-        var _pkjsWsActions = [];     // WebSocket actions for Kotlin
+        // ========== Consolidated event queue ==========
+        // All JS→Kotlin communication goes through a single typed queue,
+        // drained in one eval() call per poll cycle.
+        var _pkjsEvents = [];
 
         // ========== AppKeys mapping (injected from appinfo.json) ==========
         var _appKeys = {};
@@ -276,11 +273,11 @@ class PebbleJS(
                         resolved[numKey] = dict[k];
                     }
                 }
-                _pkjsOutbox.push({dict: resolved, txId: txId});
+                _pkjsEvents.push({t: 'msg', dict: resolved, txId: txId});
                 if (success) {
                     setTimeout(function() {
                         try { success({data: {transactionId: txId}, transactionId: txId}); } catch(e) {
-                            _pkjsLogs.push({level: 'error', msg: 'sendAppMessage success callback error: ' + e});
+                            _pkjsEvents.push({t: 'log', level: 'error', msg: 'sendAppMessage success callback error: ' + e});
                         }
                     }, 0);
                 }
@@ -296,11 +293,11 @@ class PebbleJS(
             },
 
             openURL: function(url) {
-                _pkjsOpenURLs.push(url);
+                _pkjsEvents.push({t: 'url', url: url});
             },
 
             showSimpleNotificationOnPebble: function(title, body) {
-                _pkjsNotifications.push({title: title, body: body});
+                _pkjsEvents.push({t: 'notif', title: title, body: body});
             },
 
             getActiveWatchInfo: function() {
@@ -318,7 +315,7 @@ class PebbleJS(
             },
 
             showToast: function(msg) {
-                _pkjsLogs.push({level: 'info', msg: '[pkjs] Toast: ' + msg});
+                _pkjsEvents.push({t: 'log', level: 'info', msg: '[pkjs] Toast: ' + msg});
             },
 
             // Timeline APIs - in-memory tracking (correct for bridge/emulator)
@@ -327,7 +324,7 @@ class PebbleJS(
                 if (onSuccess) {
                     setTimeout(function() {
                         try { onSuccess(token); } catch(e) {
-                            _pkjsLogs.push({level: 'error', msg: 'getTimelineToken callback error: ' + e});
+                            _pkjsEvents.push({t: 'log', level: 'error', msg: 'getTimelineToken callback error: ' + e});
                         }
                     }, 0);
                 }
@@ -338,11 +335,11 @@ class PebbleJS(
                 if (Pebble._timelineTopics.indexOf(topic) < 0) {
                     Pebble._timelineTopics.push(topic);
                 }
-                _pkjsLogs.push({level: 'info', msg: '[pkjs] timelineSubscribe: ' + topic});
+                _pkjsEvents.push({t: 'log', level: 'info', msg: '[pkjs] timelineSubscribe: ' + topic});
                 if (onSuccess) {
                     setTimeout(function() {
                         try { onSuccess(); } catch(e) {
-                            _pkjsLogs.push({level: 'error', msg: 'timelineSubscribe callback error: ' + e});
+                            _pkjsEvents.push({t: 'log', level: 'error', msg: 'timelineSubscribe callback error: ' + e});
                         }
                     }, 0);
                 }
@@ -353,11 +350,11 @@ class PebbleJS(
                     var idx = Pebble._timelineTopics.indexOf(topic);
                     if (idx >= 0) Pebble._timelineTopics.splice(idx, 1);
                 }
-                _pkjsLogs.push({level: 'info', msg: '[pkjs] timelineUnsubscribe: ' + topic});
+                _pkjsEvents.push({t: 'log', level: 'info', msg: '[pkjs] timelineUnsubscribe: ' + topic});
                 if (onSuccess) {
                     setTimeout(function() {
                         try { onSuccess(); } catch(e) {
-                            _pkjsLogs.push({level: 'error', msg: 'timelineUnsubscribe callback error: ' + e});
+                            _pkjsEvents.push({t: 'log', level: 'error', msg: 'timelineUnsubscribe callback error: ' + e});
                         }
                     }, 0);
                 }
@@ -368,7 +365,7 @@ class PebbleJS(
                 if (onSuccess) {
                     setTimeout(function() {
                         try { onSuccess(topics); } catch(e) {
-                            _pkjsLogs.push({level: 'error', msg: 'timelineSubscriptions callback error: ' + e});
+                            _pkjsEvents.push({t: 'log', level: 'error', msg: 'timelineSubscriptions callback error: ' + e});
                         }
                     }, 0);
                 }
@@ -377,11 +374,11 @@ class PebbleJS(
             _timelineTopics: [],
 
             appGlanceReload: function(slices, onSuccess, onFailure) {
-                _pkjsAppGlances.push({slices: slices});
+                _pkjsEvents.push({t: 'glance', slices: slices});
                 if (onSuccess) {
                     setTimeout(function() {
                         try { onSuccess(slices); } catch(e) {
-                            _pkjsLogs.push({level: 'error', msg: 'appGlanceReload callback error: ' + e});
+                            _pkjsEvents.push({t: 'log', level: 'error', msg: 'appGlanceReload callback error: ' + e});
                         }
                     }, 0);
                 }
@@ -389,7 +386,7 @@ class PebbleJS(
 
             // Rocky.js postMessage - stub (Rocky not supported in bridge)
             postMessage: function(data) {
-                _pkjsLogs.push({level: 'info', msg: '[pkjs] postMessage: ' + JSON.stringify(data)});
+                _pkjsEvents.push({t: 'log', level: 'info', msg: '[pkjs] postMessage: ' + JSON.stringify(data)});
             }
         };
 
@@ -429,7 +426,7 @@ class PebbleJS(
                 if (_activeTimers[id]) {
                     delete _activeTimers[id];
                     try { fn(); } catch(e) {
-                        _pkjsLogs.push({level: 'error', msg: 'setTimeout error: ' + e});
+                        _pkjsEvents.push({t: 'log', level: 'error', msg: 'setTimeout error: ' + e});
                     }
                 }
             });
@@ -442,7 +439,7 @@ class PebbleJS(
             Promise.resolve().then(function() {
                 if (_activeTimers[id]) {
                     try { fn(); } catch(e) {
-                        _pkjsLogs.push({level: 'error', msg: 'setInterval error: ' + e});
+                        _pkjsEvents.push({t: 'log', level: 'error', msg: 'setInterval error: ' + e});
                     }
                 }
             });
@@ -592,20 +589,20 @@ class PebbleJS(
                 self.readyState = 4;
                 if (self.onreadystatechange) {
                     try { self.onreadystatechange.call(self); } catch(e) {
-                        _pkjsLogs.push({level: 'error', msg: 'XHR onreadystatechange error: ' + e});
+                        _pkjsEvents.push({t: 'log', level: 'error', msg: 'XHR onreadystatechange error: ' + e});
                     }
                 }
                 if (self.onload) {
                     try { self.onload.call(self); } catch(e) {
-                        _pkjsLogs.push({level: 'error', msg: 'XHR onload error: ' + e});
+                        _pkjsEvents.push({t: 'log', level: 'error', msg: 'XHR onload error: ' + e});
                     }
                 }
             }).catch(function(err) {
                 self.readyState = 4;
-                _pkjsLogs.push({level: 'error', msg: 'XHR error: ' + err});
+                _pkjsEvents.push({t: 'log', level: 'error', msg: 'XHR error: ' + err});
                 if (self.onerror) {
                     try { self.onerror.call(self); } catch(e) {
-                        _pkjsLogs.push({level: 'error', msg: 'XHR onerror callback error: ' + e});
+                        _pkjsEvents.push({t: 'log', level: 'error', msg: 'XHR onerror callback error: ' + e});
                     }
                 }
             });
@@ -635,17 +632,17 @@ class PebbleJS(
             this.CLOSED = 3;
             _wsInstances[this._id] = this;
             // Queue connect action for Kotlin
-            _pkjsWsActions.push({action: 'connect', id: this._id, url: url});
+            _pkjsEvents.push({t: 'ws', action: 'connect', id: this._id, url: url});
         }
         WebSocket.prototype.send = function(data) {
             if (this.readyState !== 1) {
                 throw new Error('WebSocket is not open (readyState=' + this.readyState + ')');
             }
-            _pkjsWsActions.push({action: 'send', id: this._id, data: String(data)});
+            _pkjsEvents.push({t: 'ws', action: 'send', id: this._id, data: String(data)});
         };
         WebSocket.prototype.close = function(code, reason) {
             this.readyState = 2; // CLOSING
-            _pkjsWsActions.push({action: 'close', id: this._id, code: code || 1000, reason: reason || ''});
+            _pkjsEvents.push({t: 'ws', action: 'close', id: this._id, code: code || 1000, reason: reason || ''});
         };
         WebSocket.CONNECTING = 0;
         WebSocket.OPEN = 1;
@@ -675,27 +672,27 @@ class PebbleJS(
         console = {
             log: function() {
                 var msg = Array.prototype.slice.call(arguments).join(' ');
-                _pkjsLogs.push({level: 'log', msg: msg});
+                _pkjsEvents.push({t: 'log', level: 'log', msg: msg});
                 if (_origConsole.log) _origConsole.log.apply(_origConsole, arguments);
             },
             info: function() {
                 var msg = Array.prototype.slice.call(arguments).join(' ');
-                _pkjsLogs.push({level: 'info', msg: msg});
+                _pkjsEvents.push({t: 'log', level: 'info', msg: msg});
                 if (_origConsole.info) _origConsole.info.apply(_origConsole, arguments);
             },
             warn: function() {
                 var msg = Array.prototype.slice.call(arguments).join(' ');
-                _pkjsLogs.push({level: 'warn', msg: msg});
+                _pkjsEvents.push({t: 'log', level: 'warn', msg: msg});
                 if (_origConsole.warn) _origConsole.warn.apply(_origConsole, arguments);
             },
             error: function() {
                 var msg = Array.prototype.slice.call(arguments).join(' ');
-                _pkjsLogs.push({level: 'error', msg: msg});
+                _pkjsEvents.push({t: 'log', level: 'error', msg: msg});
                 if (_origConsole.error) _origConsole.error.apply(_origConsole, arguments);
             },
             debug: function() {
                 var msg = Array.prototype.slice.call(arguments).join(' ');
-                _pkjsLogs.push({level: 'debug', msg: msg});
+                _pkjsEvents.push({t: 'log', level: 'debug', msg: msg});
                 if (_origConsole.debug) _origConsole.debug.apply(_origConsole, arguments);
             }
         };
@@ -726,7 +723,7 @@ class PebbleJS(
                                 });
                             }
                         } catch(e) {
-                            _pkjsLogs.push({level: 'error', msg: 'Geolocation success callback error: ' + e});
+                            _pkjsEvents.push({t: 'log', level: 'error', msg: 'Geolocation success callback error: ' + e});
                         }
                     }, 0);
                 },
@@ -768,7 +765,7 @@ class PebbleJS(
                 try {
                     handlers[i](eventData || {type: eventName});
                 } catch(e) {
-                    _pkjsLogs.push({level: 'error', msg: 'Error in ' + eventName + ' handler: ' + e});
+                    _pkjsEvents.push({t: 'log', level: 'error', msg: 'Error in ' + eventName + ' handler: ' + e});
                 }
             }
         }
@@ -1027,9 +1024,9 @@ class PebbleJS(
     }
 
     /**
-     * Process pending events: drain logs, send queued AppMessages,
-     * handle WebSocket actions, notifications, glances, and run any
-     * deferred async work (fetch responses, timers).
+     * Process pending events: drain the consolidated event queue,
+     * handle WebSocket lifecycle, and run deferred async work.
+     * Uses a single eval() call to drain all queued events.
      */
     fun processPendingEvents() {
         val ctx = jsContext ?: return
@@ -1038,23 +1035,8 @@ class PebbleJS(
             // Run any pending async work (fetch callbacks, promise continuations)
             drainPendingWork()
 
-            // Drain console logs
-            drainLogs(ctx)
-
-            // Drain outgoing AppMessages
-            drainAppMessages(ctx)
-
-            // Drain openURL calls
-            drainOpenURLs(ctx)
-
-            // Drain notifications (send real BlobDB notifications)
-            drainNotifications(ctx)
-
-            // Drain appGlance reloads (send real BlobDB app glances)
-            drainAppGlances(ctx)
-
-            // Process WebSocket actions
-            drainWebSocketActions(ctx)
+            // Drain consolidated event queue (single eval call)
+            drainEventQueue(ctx)
 
             // Pump WebSocket incoming messages to JS
             pumpWebSocketEvents(ctx)
@@ -1073,69 +1055,49 @@ class PebbleJS(
         }
     }
 
-    private fun drainLogs(ctx: JsContext) {
+    /**
+     * Drain all events from the consolidated _pkjsEvents queue in a single
+     * eval() call, then dispatch each event by its type tag.
+     */
+    private fun drainEventQueue(ctx: JsContext) {
         try {
-            val logsJson = ctx.eval("JSON.stringify(_pkjsLogs.splice(0))")
-            if (logsJson != "[]" && logsJson.isNotEmpty()) {
-                val logs = Json.parseToJsonElement(logsJson).jsonArray
-                for (log in logs) {
-                    val obj = log.jsonObject
-                    val level = obj["level"]?.jsonPrimitive?.content ?: "log"
-                    val msg = obj["msg"]?.jsonPrimitive?.content ?: ""
-                    val ts = java.time.LocalTime.now().toString().substring(0, 8)
-                    println("[$ts] [JS $level] $msg")
-                    java.lang.System.out.flush()
+            val eventsJson = ctx.eval("JSON.stringify(_pkjsEvents.splice(0))")
+            if (eventsJson == "[]" || eventsJson.isEmpty()) return
+
+            val events = Json.parseToJsonElement(eventsJson).jsonArray
+            for (event in events) {
+                val obj = event.jsonObject
+                when (obj["t"]?.jsonPrimitive?.content) {
+                    "log" -> {
+                        val level = obj["level"]?.jsonPrimitive?.content ?: "log"
+                        val msg = obj["msg"]?.jsonPrimitive?.content ?: ""
+                        val ts = java.time.LocalTime.now().toString().substring(0, 8)
+                        println("[$ts] [JS $level] $msg")
+                        java.lang.System.out.flush()
+                    }
+                    "msg" -> {
+                        val dict = obj["dict"]?.jsonObject ?: continue
+                        val txId = obj["txId"]?.jsonPrimitive?.int?.toUByte()
+                        sendAppMessageFromJson(dict, txId)
+                    }
+                    "url" -> {
+                        val url = obj["url"]?.jsonPrimitive?.content ?: ""
+                        System.err.println("[pkjs] openURL: $url")
+                    }
+                    "notif" -> {
+                        val title = obj["title"]?.jsonPrimitive?.content ?: ""
+                        val body = obj["body"]?.jsonPrimitive?.content ?: ""
+                        sendNotificationToWatch(title, body)
+                    }
+                    "glance" -> {
+                        val slices = obj["slices"]?.jsonArray ?: continue
+                        sendAppGlanceToWatch(slices)
+                    }
+                    "ws" -> handleWebSocketAction(obj)
                 }
             }
-        } catch (_: Exception) {}
-    }
-
-    private fun drainAppMessages(ctx: JsContext) {
-        try {
-            val msgsJson = ctx.eval("JSON.stringify(_pkjsOutbox.splice(0))")
-            if (msgsJson == "[]" || msgsJson.isEmpty()) return
-
-            val msgs = Json.parseToJsonElement(msgsJson).jsonArray
-            for (msg in msgs) {
-                val obj = msg.jsonObject
-                val dict = obj["dict"]?.jsonObject ?: continue
-                val txId = obj["txId"]?.jsonPrimitive?.int?.toUByte()
-                sendAppMessageFromJson(dict, txId)
-            }
         } catch (e: Exception) {
-            System.err.println("[pkjs] Error draining AppMessages: ${e.message}")
-        }
-    }
-
-    private fun drainOpenURLs(ctx: JsContext) {
-        try {
-            val urlsJson = ctx.eval("JSON.stringify(_pkjsOpenURLs.splice(0))")
-            if (urlsJson == "[]" || urlsJson.isEmpty()) return
-
-            val urls = Json.parseToJsonElement(urlsJson).jsonArray
-            for (url in urls) {
-                System.err.println("[pkjs] openURL: ${url.jsonPrimitive.content}")
-            }
-        } catch (_: Exception) {}
-    }
-
-    /**
-     * Send real notifications to the watch via BlobDB Notification database.
-     */
-    private fun drainNotifications(ctx: JsContext) {
-        try {
-            val notifJson = ctx.eval("JSON.stringify(_pkjsNotifications.splice(0))")
-            if (notifJson == "[]" || notifJson.isEmpty()) return
-
-            val notifs = Json.parseToJsonElement(notifJson).jsonArray
-            for (notif in notifs) {
-                val obj = notif.jsonObject
-                val title = obj["title"]?.jsonPrimitive?.content ?: ""
-                val body = obj["body"]?.jsonPrimitive?.content ?: ""
-                sendNotificationToWatch(title, body)
-            }
-        } catch (e: Exception) {
-            System.err.println("[pkjs] Error draining notifications: ${e.message}")
+            System.err.println("[pkjs] Error draining event queue: ${e.message}")
         }
     }
 
@@ -1193,25 +1155,6 @@ class PebbleJS(
             System.err.println("[pkjs] Sent notification to watch: $title")
         } catch (e: Exception) {
             System.err.println("[pkjs] Failed to send notification: ${e.message}")
-        }
-    }
-
-    /**
-     * Send real app glance data to the watch via BlobDB AppGlance database.
-     */
-    private fun drainAppGlances(ctx: JsContext) {
-        try {
-            val glancesJson = ctx.eval("JSON.stringify(_pkjsAppGlances.splice(0))")
-            if (glancesJson == "[]" || glancesJson.isEmpty()) return
-
-            val glances = Json.parseToJsonElement(glancesJson).jsonArray
-            for (glance in glances) {
-                val obj = glance.jsonObject
-                val slices = obj["slices"]?.jsonArray ?: continue
-                sendAppGlanceToWatch(slices)
-            }
-        } catch (e: Exception) {
-            System.err.println("[pkjs] Error draining app glances: ${e.message}")
         }
     }
 
@@ -1280,41 +1223,33 @@ class PebbleJS(
     }
 
     /**
-     * Process WebSocket actions queued from JS (connect, send, close).
+     * Handle a single WebSocket action event from the consolidated queue.
      */
-    private fun drainWebSocketActions(ctx: JsContext) {
+    private fun handleWebSocketAction(obj: JsonObject) {
         try {
-            val actionsJson = ctx.eval("JSON.stringify(_pkjsWsActions.splice(0))")
-            if (actionsJson == "[]" || actionsJson.isEmpty()) return
+            val act = obj["action"]?.jsonPrimitive?.content ?: return
+            val id = obj["id"]?.jsonPrimitive?.int ?: return
 
-            val actions = Json.parseToJsonElement(actionsJson).jsonArray
-            for (action in actions) {
-                val obj = action.jsonObject
-                val act = obj["action"]?.jsonPrimitive?.content ?: continue
-                val id = obj["id"]?.jsonPrimitive?.int ?: continue
-
-                when (act) {
-                    "connect" -> {
-                        val url = obj["url"]?.jsonPrimitive?.content ?: continue
-                        val ws = JavaWebSocket(id, url)
-                        webSockets[id] = ws
-                        // Connect in background thread
-                        Thread { ws.connect() }.start()
-                        System.err.println("[pkjs] WebSocket connecting: $url")
-                    }
-                    "send" -> {
-                        val data = obj["data"]?.jsonPrimitive?.content ?: ""
-                        webSockets[id]?.send(data)
-                    }
-                    "close" -> {
-                        val code = obj["code"]?.jsonPrimitive?.int ?: 1000
-                        val reason = obj["reason"]?.jsonPrimitive?.content ?: ""
-                        webSockets[id]?.close(code, reason)
-                    }
+            when (act) {
+                "connect" -> {
+                    val url = obj["url"]?.jsonPrimitive?.content ?: return
+                    val ws = JavaWebSocket(id, url)
+                    webSockets[id] = ws
+                    Thread { ws.connect() }.start()
+                    System.err.println("[pkjs] WebSocket connecting: $url")
+                }
+                "send" -> {
+                    val data = obj["data"]?.jsonPrimitive?.content ?: ""
+                    webSockets[id]?.send(data)
+                }
+                "close" -> {
+                    val code = obj["code"]?.jsonPrimitive?.int ?: 1000
+                    val reason = obj["reason"]?.jsonPrimitive?.content ?: ""
+                    webSockets[id]?.close(code, reason)
                 }
             }
         } catch (e: Exception) {
-            System.err.println("[pkjs] Error draining WS actions: ${e.message}")
+            System.err.println("[pkjs] Error handling WS action: ${e.message}")
         }
     }
 
