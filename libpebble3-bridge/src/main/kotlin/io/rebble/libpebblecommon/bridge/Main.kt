@@ -695,8 +695,11 @@ class QemuBridge(private val port: Int) {
         var pkjs: PebbleJS? = null
         try {
             val zipFile = ZipFile(pbwPath)
+            // Modern SDK bundles JS as index.js, older SDKs as pebble-js-app.js
             val jsEntry = zipFile.getEntry("pebble-js-app.js")
                 ?: zipFile.getEntry("$platform/pebble-js-app.js")
+                ?: zipFile.getEntry("index.js")
+                ?: zipFile.getEntry("$platform/index.js")
             if (jsEntry != null) {
                 val jsSource = zipFile.getInputStream(jsEntry).bufferedReader().readText()
                 val meta = parseAppHeader(
@@ -704,9 +707,9 @@ class QemuBridge(private val port: Int) {
                 )
                 pkjs = PebbleJS(this, jsSource, meta.uuid)
                 pkjs.start()
-                System.err.println("[bridge] PKJS runtime started for ${meta.appName}")
+                System.err.println("[bridge] PKJS runtime started for ${meta.appName} (from ${jsEntry.name})")
             } else {
-                System.err.println("[bridge] No pebble-js-app.js found in PBW, PKJS disabled")
+                System.err.println("[bridge] No JS found in PBW (checked pebble-js-app.js and index.js), PKJS disabled")
             }
             zipFile.close()
         } catch (e: Exception) {

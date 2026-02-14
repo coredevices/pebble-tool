@@ -983,7 +983,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_library_rs_checksum_method_jscontext_eval() != 11520.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_library_rs_checksum_method_jscontext_eval_async() != 46932.toShort()) {
+    if (lib.uniffi_library_rs_checksum_method_jscontext_eval_async() != 32377.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_library_rs_checksum_method_jscontext_register_runtime() != 37663.toShort()) {
@@ -1554,7 +1554,10 @@ public interface JsContextInterface {
     fun `eval`(`code`: kotlin.String): kotlin.String
     
     /**
-     * Evaluate JavaScript code asynchronously and await any returned promises
+     * Evaluate JavaScript code asynchronously and await any returned promises.
+     * Always runs the job queue to process pending async work (fetch callbacks,
+     * promise continuations, etc.) regardless of whether the evaluated expression
+     * itself returns a promise.
      */
     fun `evalAsync`(`code`: kotlin.String): kotlin.String
     
@@ -1681,7 +1684,10 @@ open class JsContext: Disposable, AutoCloseable, JsContextInterface
 
     
     /**
-     * Evaluate JavaScript code asynchronously and await any returned promises
+     * Evaluate JavaScript code asynchronously and await any returned promises.
+     * Always runs the job queue to process pending async work (fetch callbacks,
+     * promise continuations, etc.) regardless of whether the evaluated expression
+     * itself returns a promise.
      */
     @Throws(JsException::class)override fun `evalAsync`(`code`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(

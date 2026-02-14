@@ -286,8 +286,10 @@ class PebbleJS(
      */
     private val fetcher = object : JsFetcher {
         override suspend fun fetch(request: JsRequestKt): JsResponseKt {
-            return withContext(Dispatchers.IO) {
-                try {
+            // IMPORTANT: UniFFI panics if any non-FetcherException escapes this callback.
+            // We must catch absolutely everything and convert to FetcherException.
+            try {
+                return withContext(Dispatchers.IO) {
                     val conn = URI(request.url).toURL().openConnection() as HttpURLConnection
                     conn.requestMethod = request.method
                     conn.connectTimeout = 30000
@@ -319,9 +321,15 @@ class PebbleJS(
                         headers = headers,
                         body = body
                     )
-                } catch (e: Exception) {
-                    throw FetcherException.NetworkException("HTTP request failed: ${e.message}")
                 }
+            } catch (e: FetcherException) {
+                throw e
+            } catch (e: Throwable) {
+                // Catch everything including Error subclasses and convert to the
+                // expected exception type so UniFFI doesn't panic
+                throw FetcherException.NetworkException(
+                    "${e.javaClass.simpleName}: ${e.message ?: "unknown error"}"
+                )
             }
         }
     }
