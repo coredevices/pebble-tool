@@ -151,6 +151,15 @@ fun main(args: Array<String>) {
             bridge.emuAccel(samples)
             bridge.disconnect()
         }
+        // --- Standalone notification command (BlobDB) ---
+        "send-notification" -> {
+            requireArgs(args, 4, "send-notification <qemu_port> <title> <body>")
+            val bridge = QemuBridge(args[1].toInt())
+            bridge.connect()
+            bridge.negotiate()
+            bridge.sendNotification(args[2], args[3])
+            bridge.disconnect()
+        }
         // --- Data Logging Commands ---
         "data-logging-list" -> {
             requireArgs(args, 2, "data-logging-list <qemu_port>")
@@ -203,6 +212,7 @@ fun printUsage() {
           data-logging-list <port>                       List data logging sessions (JSON)
           data-logging-get-send-enabled <port>           Check send enabled (JSON)
           data-logging-set-send-enabled <port> <0/1>     Set send enabled
+          send-notification <port> <title> <body>          Send BlobDB notification
 
         QEMU Control Commands (no negotiation):
           emu-tap <port> <axis:0-2> <dir:+1/-1>         Emulate tap
@@ -1024,5 +1034,76 @@ class QemuBridge(private val port: Int) {
         sendPacket(DataLoggingOutgoingPacket.SetSendEnabled(enabled))
         val status = if (enabled) "ENABLED" else "DISABLED"
         println("""{"enabled":$enabled,"status":"$status"}""")
+    }
+
+    // ====================================================================
+    // Standalone Notification (BlobDB)
+    // ====================================================================
+
+    fun sendNotification(title: String, body: String) {
+        System.err.println("[bridge] Sending notification: $title")
+
+        val notifUuid = Uuid.random()
+        val now = (java.lang.System.currentTimeMillis() / 1000).toUInt()
+
+        val attributes = mutableListOf<io.rebble.libpebblecommon.packets.blobdb.TimelineItem.Attribute>()
+        val titleBytes = title.toByteArray(Charsets.UTF_8).toUByteArray()
+        attributes.add(io.rebble.libpebblecommon.packets.blobdb.TimelineItem.Attribute(
+            io.rebble.libpebblecommon.packets.blobdb.TimelineAttribute.Title.id, titleBytes))
+        val bodyBytes = body.toByteArray(Charsets.UTF_8).toUByteArray()
+        attributes.add(io.rebble.libpebblecommon.packets.blobdb.TimelineItem.Attribute(
+            io.rebble.libpebblecommon.packets.blobdb.TimelineAttribute.Body.id, bodyBytes))
+        val senderBytes = "Bridge E2E".toByteArray(Charsets.UTF_8).toUByteArray()
+        attributes.add(io.rebble.libpebblecommon.packets.blobdb.TimelineItem.Attribute(
+            io.rebble.libpebblecommon.packets.blobdb.TimelineAttribute.Sender.id, senderBytes))
+
+        val timelineItem = io.rebble.libpebblecommon.packets.blobdb.TimelineItem(
+            itemId = notifUuid,
+            parentId = Uuid.NIL,
+            timestampSecs = now,
+            duration = 0u,
+            type = io.rebble.libpebblecommon.packets.blobdb.TimelineItem.Type.Notification,
+            flags = io.rebble.libpebblecommon.packets.blobdb.TimelineItem.Flag.makeFlags(
+                listOf(io.rebble.libpebblecommon.packets.blobdb.TimelineItem.Flag.IS_VISIBLE)),
+            layout = io.rebble.libpebblecommon.packets.blobdb.TimelineItem.Layout.GenericNotification,
+            attributes = attributes,
+            actions = listOf(
+                io.rebble.libpebblecommon.packets.blobdb.TimelineItem.Action(
+                    0u,
+                    io.rebble.libpebblecommon.packets.blobdb.TimelineItem.Action.Type.Dismiss,
+                    listOf(io.rebble.libpebblecommon.packets.blobdb.TimelineItem.Attribute(
+                        io.rebble.libpebblecommon.packets.blobdb.TimelineAttribute.Title.id,
+                        "Dismiss".toByteArray(Charsets.UTF_8).toUByteArray()
+                    ))
+                )
+            )
+        )
+
+        val itemBytes = timelineItem.toBytes()
+        val uuidBytes = notifUuid.toByteArray().toUByteArray()
+        val token = (java.lang.System.currentTimeMillis() % 65536).toUShort()
+
+        val insertCmd = io.rebble.libpebblecommon.packets.blobdb.BlobCommand.InsertCommand(
+            token = token,
+            database = coredev.BlobDatabase.Notification,
+            key = uuidBytes,
+            value = itemBytes
+        )
+        sendPacket(insertCmd)
+
+        // Wait for BlobDB response
+        val timeout = java.lang.System.currentTimeMillis() + 10_000
+        while (java.lang.System.currentTimeMillis() < timeout) {
+            val packet = readPacket() ?: continue
+            if (packet is io.rebble.libpebblecommon.packets.blobdb.BlobResponse) {
+                val status = packet.responseValue
+                println("Notification sent: $status")
+                System.err.println("[bridge] BlobDB response for notification: $status")
+                return
+            }
+            handleBackgroundPacket(packet)
+        }
+        System.err.println("[bridge] WARNING: No BlobDB response for notification")
+        println("Notification sent: timeout")
     }
 }
