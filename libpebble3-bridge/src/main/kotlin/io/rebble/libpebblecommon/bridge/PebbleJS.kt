@@ -407,6 +407,26 @@ class PebbleJS(
             delete _activeTimers[id];
         }
 
+        // ========== fetch() wrapper ==========
+        // Boa's native fetch() doesn't expose response headers on the JS
+        // Response object. The Kotlin JsFetcher prepends a JSON header block
+        // to the response body (delimited by \0). XHR.send() uses _origFetch
+        // and strips the prefix. We also wrap fetch() for direct callers.
+        var _origFetch = fetch;
+        fetch = function(url, opts) {
+            return _origFetch(url, opts).then(function(response) {
+                var origText = response.text.bind(response);
+                response.text = function() {
+                    return origText().then(function(rawText) {
+                        var sepIdx = rawText.indexOf('\0');
+                        if (sepIdx >= 0) return rawText.substring(sepIdx + 1);
+                        return rawText;
+                    });
+                };
+                return response;
+            });
+        };
+
         // ========== XMLHttpRequest ==========
         function XMLHttpRequest() {
             this.readyState = 0;
@@ -492,23 +512,33 @@ class PebbleJS(
             if (body && (self._method === 'POST' || self._method === 'PUT' || self._method === 'PATCH')) {
                 fetchOpts.body = body;
             }
-            fetch(self._url, fetchOpts).then(function(response) {
+            // Use the raw _origFetch to get the response with our header prefix
+            _origFetch(self._url, fetchOpts).then(function(response) {
                 self.status = response.status;
                 self.statusText = response.statusText || '';
-                // Capture response headers
-                if (response.headers) {
-                    response.headers.forEach(function(value, key) {
-                        self._responseHeaders[key] = value;
-                    });
+                return response.text();
+            }).then(function(rawText) {
+                // The Kotlin JsFetcher prepends headers as JSON + \0 to the body.
+                // Strip them out and populate _responseHeaders.
+                var actualText = rawText;
+                var sepIdx = rawText.indexOf('\0');
+                if (sepIdx >= 0) {
+                    try {
+                        var hdrs = JSON.parse(rawText.substring(0, sepIdx));
+                        for (var key in hdrs) {
+                            if (hdrs.hasOwnProperty(key)) {
+                                self._responseHeaders[key] = hdrs[key];
+                            }
+                        }
+                    } catch(e) {}
+                    actualText = rawText.substring(sepIdx + 1);
                 }
                 self.readyState = 2; // HEADERS_RECEIVED
                 if (self.onreadystatechange) {
                     try { self.onreadystatechange.call(self); } catch(e) {}
                 }
-                return response.text();
-            }).then(function(text) {
-                self.responseText = text;
-                self.response = text;
+                self.responseText = actualText;
+                self.response = actualText;
                 self.readyState = 4;
                 if (self.onreadystatechange) {
                     try { self.onreadystatechange.call(self); } catch(e) {
@@ -695,8 +725,67 @@ class PebbleJS(
     }
 
     /**
+     * Detect HTTP(S) proxy from environment variables (HTTP_PROXY, HTTPS_PROXY, etc.)
+     * Returns a Proxy object or Proxy.NO_PROXY.
+     */
+    private fun detectProxy(url: String): java.net.Proxy {
+        val isHttps = url.startsWith("https://", ignoreCase = true)
+
+        // Check NO_PROXY / no_proxy
+        val noProxy = System.getenv("NO_PROXY") ?: System.getenv("no_proxy") ?: ""
+        if (noProxy.isNotEmpty()) {
+            val host = try { URI(url).host ?: "" } catch (_: Exception) { "" }
+            for (entry in noProxy.split(",")) {
+                val pattern = entry.trim()
+                if (pattern.isEmpty()) continue
+                if (pattern == "*") return java.net.Proxy.NO_PROXY
+                if (host == pattern || host.endsWith(pattern.removePrefix("*"))) {
+                    return java.net.Proxy.NO_PROXY
+                }
+            }
+        }
+
+        // Pick proxy URL from env: HTTPS_PROXY for https, HTTP_PROXY for http
+        val proxyUrl = if (isHttps) {
+            System.getenv("HTTPS_PROXY") ?: System.getenv("https_proxy")
+        } else {
+            System.getenv("HTTP_PROXY") ?: System.getenv("http_proxy")
+        } ?: return java.net.Proxy.NO_PROXY
+
+        return try {
+            val proxyUri = URI(proxyUrl)
+            val proxyHost = proxyUri.host ?: return java.net.Proxy.NO_PROXY
+            val proxyPort = if (proxyUri.port > 0) proxyUri.port else 80
+
+            // Extract proxy credentials from URL (user:password@host format)
+            val userInfo = proxyUri.userInfo
+            if (userInfo != null) {
+                val parts = userInfo.split(":", limit = 2)
+                val user = parts[0]
+                val pass = if (parts.size > 1) parts[1] else ""
+                // Set the default Authenticator for proxy auth (used by CONNECT tunneling)
+                java.net.Authenticator.setDefault(object : java.net.Authenticator() {
+                    override fun getPasswordAuthentication(): java.net.PasswordAuthentication? {
+                        if (requestorType == RequestorType.PROXY) {
+                            return java.net.PasswordAuthentication(user, pass.toCharArray())
+                        }
+                        return null
+                    }
+                })
+                // Also set system properties for HTTPS tunneling
+                System.setProperty("jdk.http.auth.tunneling.disabledSchemes", "")
+            }
+
+            java.net.Proxy(java.net.Proxy.Type.HTTP, java.net.InetSocketAddress(proxyHost, proxyPort))
+        } catch (_: Exception) {
+            java.net.Proxy.NO_PROXY
+        }
+    }
+
+    /**
      * JsFetcher implementation that delegates HTTP requests from the
      * JS fetch() API to Java's HttpURLConnection.
+     * Automatically detects and uses HTTP_PROXY/HTTPS_PROXY env vars.
      */
     private val fetcher = object : JsFetcher {
         override suspend fun fetch(request: JsRequestKt): JsResponseKt {
@@ -704,7 +793,8 @@ class PebbleJS(
             // We must catch absolutely everything and convert to FetcherException.
             try {
                 return withContext(Dispatchers.IO) {
-                    val conn = URI(request.url).toURL().openConnection() as HttpURLConnection
+                    val proxy = detectProxy(request.url)
+                    val conn = URI(request.url).toURL().openConnection(proxy) as HttpURLConnection
                     conn.requestMethod = request.method
                     conn.connectTimeout = 30000
                     conn.readTimeout = 30000
@@ -727,13 +817,31 @@ class PebbleJS(
                     val headers = mutableMapOf<String, String>()
                     conn.headerFields?.forEach { (key, values) ->
                         if (key != null && values != null) {
-                            headers[key] = values.joinToString(", ")
+                            headers[key.lowercase()] = values.joinToString(", ")
                         }
                     }
+                    // Boa's fetch() doesn't expose response headers on the JS
+                    // Response object, so we prepend them as JSON + \0 to the
+                    // body. Our JS fetch() wrapper strips them out.
+                    // Serialize headers to JSON manually (simpler than kotlinx serialization)
+                    val headersJson = buildString {
+                        append("{")
+                        headers.entries.forEachIndexed { i, (k, v) ->
+                            if (i > 0) append(",")
+                            append("\"")
+                            append(k.replace("\"", "\\\""))
+                            append("\":\"")
+                            append(v.replace("\"", "\\\""))
+                            append("\"")
+                        }
+                        append("}")
+                    }
+                    val prefixedBody = headersJson.toByteArray(Charsets.UTF_8) +
+                        byteArrayOf(0) + body
                     JsResponseKt(
                         status = status.toUShort(),
                         headers = headers,
-                        body = body
+                        body = prefixedBody
                     )
                 }
             } catch (e: FetcherException) {

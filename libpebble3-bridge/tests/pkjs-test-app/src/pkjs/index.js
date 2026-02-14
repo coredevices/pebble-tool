@@ -243,30 +243,40 @@ Pebble.addEventListener('ready', function(e) {
     xhr.abort();
     check('XHR.abort sets readyState=0', xhr.readyState === 0);
 
-    // XHR real network test (may fail in container due to DNS)
+    // XHR real network test - fetch weather data as a realistic API call
     var xhrGet = new XMLHttpRequest();
     xhrGet.onload = function() {
         check('XHR GET succeeds', this.status === 200, 'status=' + this.status);
         check('XHR responseText', this.responseText.length > 0, 'len=' + this.responseText.length);
+        // Verify the response is valid JSON from the weather API
+        var parsed = JSON.parse(this.responseText);
+        check('XHR response is valid JSON', typeof parsed.latitude === 'number',
+              'lat=' + parsed.latitude);
+        // Debug: log what _responseHeaders looks like
+        var headerKeys = Object.keys(this._responseHeaders);
+        console.log('XHR response header keys: ' + JSON.stringify(headerKeys));
         var ct = this.getResponseHeader('Content-Type');
         check('XHR getResponseHeader', ct !== null, 'ct=' + ct);
-        check('XHR getAllResponseHeaders', this.getAllResponseHeaders().length > 0);
+        var allHeaders = this.getAllResponseHeaders();
+        check('XHR getAllResponseHeaders', allHeaders.length > 0,
+              'len=' + allHeaders.length);
     };
     xhrGet.onerror = function() {
-        console.warn('XHR GET network error (expected in container)');
+        fail('XHR GET to open-meteo failed (network error)');
     };
-    xhrGet.open('GET', 'https://httpbin.org/get?pkjs=1');
+    xhrGet.open('GET', 'https://api.open-meteo.com/v1/forecast?latitude=37.44&longitude=-122.14&current=temperature_2m');
     xhrGet.send();
 
-    // XHR POST
+    // XHR POST - use a simple echo service or just verify POST mechanics
     var xhrPost = new XMLHttpRequest();
     xhrPost.onload = function() {
+        // open-meteo returns 200 even for POST (treats it as GET)
         check('XHR POST succeeds', this.status === 200, 'status=' + this.status);
     };
     xhrPost.onerror = function() {
-        console.warn('XHR POST network error (expected in container)');
+        fail('XHR POST to open-meteo failed (network error)');
     };
-    xhrPost.open('POST', 'https://httpbin.org/post');
+    xhrPost.open('POST', 'https://api.open-meteo.com/v1/forecast?latitude=37.44&longitude=-122.14&current=temperature_2m');
     xhrPost.setRequestHeader('Content-Type', 'application/json');
     xhrPost.send(JSON.stringify({test: true}));
 
@@ -399,18 +409,54 @@ Pebble.addEventListener('appmessage', function(e) {
     var cmd = e.payload['0'] || e.payload[0];
 
     if (cmd === 1) {
-        // Weather test using real geolocation
+        // Weather test: geolocation -> XHR to Open-Meteo -> sendAppMessage
+        // This is the real pattern every Pebble weather app uses.
         console.log('CMD 1: Weather request');
         navigator.geolocation.getCurrentPosition(
             function(pos) {
                 check('weather geolocation success', typeof pos.coords.latitude === 'number',
                       'lat=' + pos.coords.latitude + ' lon=' + pos.coords.longitude);
-                // Send weather data using the real coords
-                Pebble.sendAppMessage(
-                    {'Temperature': 22, 'City': 'Palo Alto', 'Status': 'Sunny'},
-                    function() { pass('weather sendAppMessage with string keys'); },
-                    function(d, e) { fail('weather sendAppMessage', e); }
-                );
+
+                // Fetch real weather from Open-Meteo using the geo coords
+                var url = 'https://api.open-meteo.com/v1/forecast' +
+                    '?latitude=' + pos.coords.latitude +
+                    '&longitude=' + pos.coords.longitude +
+                    '&current=temperature_2m,weather_code' +
+                    '&temperature_unit=celsius';
+                console.log('Fetching weather: ' + url);
+
+                var xhr = new XMLHttpRequest();
+                xhr.onload = function() {
+                    check('weather XHR status', this.status === 200, 'status=' + this.status);
+                    var data = JSON.parse(this.responseText);
+                    check('weather API has current', typeof data.current === 'object',
+                          JSON.stringify(data.current));
+                    var temp = Math.round(data.current.temperature_2m);
+                    var wmoCode = data.current.weather_code;
+                    // WMO weather codes: 0=clear, 1-3=partly cloudy, 45-48=fog,
+                    // 51-55=drizzle, 61-65=rain, 71-75=snow, 80-82=showers, 95+=thunderstorm
+                    var conditions = 'Unknown';
+                    if (wmoCode <= 0) conditions = 'Clear';
+                    else if (wmoCode <= 3) conditions = 'Partly Cloudy';
+                    else if (wmoCode <= 48) conditions = 'Foggy';
+                    else if (wmoCode <= 55) conditions = 'Drizzle';
+                    else if (wmoCode <= 65) conditions = 'Rain';
+                    else if (wmoCode <= 75) conditions = 'Snow';
+                    else if (wmoCode <= 82) conditions = 'Showers';
+                    else conditions = 'Thunderstorm';
+                    console.log('Real weather: ' + temp + 'C, ' + conditions + ' (WMO ' + wmoCode + ')');
+
+                    Pebble.sendAppMessage(
+                        {'Temperature': temp, 'City': 'Palo Alto', 'Status': conditions},
+                        function() { pass('weather sendAppMessage with real data'); },
+                        function(d, e) { fail('weather sendAppMessage', e); }
+                    );
+                };
+                xhr.onerror = function() {
+                    fail('weather XHR fetch failed (network error)');
+                };
+                xhr.open('GET', url);
+                xhr.send();
             },
             function(err) {
                 fail('weather geolocation error', err.message);
