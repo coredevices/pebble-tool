@@ -50,13 +50,17 @@ class PebbleJS(
      */
     private val bootstrapJS = """
         // ========== Internal queues ==========
-        var _pkjsOutbox = [];      // outgoing AppMessage queue
-        var _pkjsLogs = [];        // console log queue
-        var _pkjsOpenURLs = [];    // openURL calls
+        var _pkjsOutbox = [];        // outgoing AppMessage queue
+        var _pkjsLogs = [];          // console log queue
+        var _pkjsOpenURLs = [];      // openURL calls
         var _pkjsNotifications = []; // notification calls
+
+        // ========== AppKeys mapping (injected from appinfo.json) ==========
+        var _appKeys = {};
 
         // ========== Pebble API ==========
         var _pkjsHandlers = {};
+        var _pkjsTxIdCounter = 0;
 
         var Pebble = {
             addEventListener: function(event, callback) {
@@ -70,33 +74,44 @@ class PebbleJS(
             },
             on: function(event, callback) { Pebble.addEventListener(event, callback); },
             off: function(event, callback) { Pebble.removeEventListener(event, callback); },
+
             sendAppMessage: function(dict, success, error) {
-                var txId = (_pkjsOutbox.length + 1);
-                _pkjsOutbox.push({dict: dict, txId: txId});
-                // Schedule success callback asynchronously
+                var txId = ++_pkjsTxIdCounter;
+                // Resolve string keys via _appKeys before queueing
+                var resolved = {};
+                for (var k in dict) {
+                    if (dict.hasOwnProperty(k)) {
+                        var numKey = _appKeys.hasOwnProperty(k) ? _appKeys[k] : (isNaN(Number(k)) ? k : Number(k));
+                        resolved[numKey] = dict[k];
+                    }
+                }
+                _pkjsOutbox.push({dict: resolved, txId: txId});
                 if (success) {
                     setTimeout(function() {
-                        try { success({transactionId: txId}); } catch(e) {
+                        try { success({data: {transactionId: txId}, transactionId: txId}); } catch(e) {
                             _pkjsLogs.push({level: 'error', msg: 'sendAppMessage success callback error: ' + e});
                         }
                     }, 0);
                 }
                 return txId;
             },
+
             getAccountToken: function() {
                 return '0123456789abcdef0123456789abcdef';
             },
+
             getWatchToken: function() {
                 return 'fedcba9876543210fedcba9876543210';
             },
+
             openURL: function(url) {
                 _pkjsOpenURLs.push(url);
-                _pkjsLogs.push({level: 'info', msg: '[pkjs] openURL: ' + url});
             },
+
             showSimpleNotificationOnPebble: function(title, body) {
                 _pkjsNotifications.push({title: title, body: body});
-                _pkjsLogs.push({level: 'info', msg: '[pkjs] Notification: ' + title + ' - ' + body});
             },
+
             getActiveWatchInfo: function() {
                 return {
                     platform: 'basalt',
@@ -105,8 +120,82 @@ class PebbleJS(
                     firmware: { major: 4, minor: 4, patch: 0, suffix: '' }
                 };
             },
+
             showToast: function(msg) {
                 _pkjsLogs.push({level: 'info', msg: '[pkjs] Toast: ' + msg});
+            },
+
+            // Timeline APIs - stubs for bridge mode
+            getTimelineToken: function(onSuccess, onFailure) {
+                // In bridge/emulator mode there's no real timeline service.
+                // Generate a deterministic dummy token.
+                var token = 'bridge-timeline-token-00000000';
+                if (onSuccess) {
+                    setTimeout(function() {
+                        try { onSuccess(token); } catch(e) {
+                            _pkjsLogs.push({level: 'error', msg: 'getTimelineToken callback error: ' + e});
+                        }
+                    }, 0);
+                }
+            },
+
+            timelineSubscribe: function(topic, onSuccess, onFailure) {
+                if (!Pebble._timelineTopics) Pebble._timelineTopics = [];
+                if (Pebble._timelineTopics.indexOf(topic) < 0) {
+                    Pebble._timelineTopics.push(topic);
+                }
+                _pkjsLogs.push({level: 'info', msg: '[pkjs] timelineSubscribe: ' + topic});
+                if (onSuccess) {
+                    setTimeout(function() {
+                        try { onSuccess(); } catch(e) {
+                            _pkjsLogs.push({level: 'error', msg: 'timelineSubscribe callback error: ' + e});
+                        }
+                    }, 0);
+                }
+            },
+
+            timelineUnsubscribe: function(topic, onSuccess, onFailure) {
+                if (Pebble._timelineTopics) {
+                    var idx = Pebble._timelineTopics.indexOf(topic);
+                    if (idx >= 0) Pebble._timelineTopics.splice(idx, 1);
+                }
+                _pkjsLogs.push({level: 'info', msg: '[pkjs] timelineUnsubscribe: ' + topic});
+                if (onSuccess) {
+                    setTimeout(function() {
+                        try { onSuccess(); } catch(e) {
+                            _pkjsLogs.push({level: 'error', msg: 'timelineUnsubscribe callback error: ' + e});
+                        }
+                    }, 0);
+                }
+            },
+
+            timelineSubscriptions: function(onSuccess, onFailure) {
+                var topics = Pebble._timelineTopics ? Pebble._timelineTopics.slice() : [];
+                if (onSuccess) {
+                    setTimeout(function() {
+                        try { onSuccess(topics); } catch(e) {
+                            _pkjsLogs.push({level: 'error', msg: 'timelineSubscriptions callback error: ' + e});
+                        }
+                    }, 0);
+                }
+            },
+
+            _timelineTopics: [],
+
+            appGlanceReload: function(slices, onSuccess, onFailure) {
+                _pkjsLogs.push({level: 'info', msg: '[pkjs] appGlanceReload: ' + JSON.stringify(slices)});
+                if (onSuccess) {
+                    setTimeout(function() {
+                        try { onSuccess(slices); } catch(e) {
+                            _pkjsLogs.push({level: 'error', msg: 'appGlanceReload callback error: ' + e});
+                        }
+                    }, 0);
+                }
+            },
+
+            // Rocky.js postMessage - stub
+            postMessage: function(data) {
+                _pkjsLogs.push({level: 'info', msg: '[pkjs] postMessage: ' + JSON.stringify(data)});
             }
         };
 
@@ -125,6 +214,13 @@ class PebbleJS(
             },
             clear: function() {
                 _localStorageData = {};
+            },
+            get length() {
+                return Object.keys(_localStorageData).length;
+            },
+            key: function(index) {
+                var keys = Object.keys(_localStorageData);
+                return index < keys.length ? keys[index] : null;
             }
         };
 
@@ -132,13 +228,9 @@ class PebbleJS(
         var _timerIdCounter = 0;
         var _activeTimers = {};
 
-        // Boa has queueMicrotask but not setTimeout natively,
-        // so we implement basic timer support using promises.
-        // For the bridge's polling model, immediate timers are fine.
         function setTimeout(fn, delay) {
             var id = ++_timerIdCounter;
             _activeTimers[id] = true;
-            // Use a resolved promise to defer execution
             Promise.resolve().then(function() {
                 if (_activeTimers[id]) {
                     delete _activeTimers[id];
@@ -151,8 +243,6 @@ class PebbleJS(
         }
 
         function setInterval(fn, delay) {
-            // For bridge usage, we implement setInterval as a single
-            // deferred call. The Kotlin side re-triggers via polling.
             var id = ++_timerIdCounter;
             _activeTimers[id] = {fn: fn, delay: delay};
             Promise.resolve().then(function() {
@@ -177,15 +267,28 @@ class PebbleJS(
         function XMLHttpRequest() {
             this.readyState = 0;
             this.status = 0;
+            this.statusText = '';
             this.responseText = '';
             this.response = '';
+            this.responseType = '';
+            this.timeout = 0;
+            this.withCredentials = false;
             this._method = 'GET';
             this._url = '';
             this._async = true;
             this._headers = {};
+            this._responseHeaders = {};
             this.onload = null;
             this.onerror = null;
+            this.ontimeout = null;
+            this.onabort = null;
             this.onreadystatechange = null;
+            this.onprogress = null;
+            this.UNSENT = 0;
+            this.OPENED = 1;
+            this.HEADERS_RECEIVED = 2;
+            this.LOADING = 3;
+            this.DONE = 4;
         }
 
         XMLHttpRequest.prototype.open = function(method, url, async) {
@@ -193,11 +296,47 @@ class PebbleJS(
             this._url = url;
             this._async = (async !== false);
             this._headers = {};
+            this._responseHeaders = {};
             this.readyState = 1;
+            this.status = 0;
+            this.statusText = '';
+            this.responseText = '';
+            this.response = '';
         };
 
         XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
             this._headers[name] = value;
+        };
+
+        XMLHttpRequest.prototype.getResponseHeader = function(name) {
+            if (this.readyState < 2) return null;
+            var lowerName = name.toLowerCase();
+            for (var key in this._responseHeaders) {
+                if (key.toLowerCase() === lowerName) {
+                    return this._responseHeaders[key];
+                }
+            }
+            return null;
+        };
+
+        XMLHttpRequest.prototype.getAllResponseHeaders = function() {
+            if (this.readyState < 2) return '';
+            var result = '';
+            for (var key in this._responseHeaders) {
+                result += key + ': ' + this._responseHeaders[key] + '\r\n';
+            }
+            return result;
+        };
+
+        XMLHttpRequest.prototype.overrideMimeType = function(mime) {
+            this._overrideMime = mime;
+        };
+
+        XMLHttpRequest.prototype.abort = function() {
+            this.readyState = 0;
+            if (this.onabort) {
+                try { this.onabort.call(this); } catch(e) {}
+            }
         };
 
         XMLHttpRequest.prototype.send = function(body) {
@@ -211,19 +350,30 @@ class PebbleJS(
             }
             fetch(self._url, fetchOpts).then(function(response) {
                 self.status = response.status;
+                self.statusText = response.statusText || '';
+                // Capture response headers
+                if (response.headers) {
+                    response.headers.forEach(function(value, key) {
+                        self._responseHeaders[key] = value;
+                    });
+                }
+                self.readyState = 2; // HEADERS_RECEIVED
+                if (self.onreadystatechange) {
+                    try { self.onreadystatechange.call(self); } catch(e) {}
+                }
                 return response.text();
             }).then(function(text) {
                 self.responseText = text;
                 self.response = text;
                 self.readyState = 4;
-                if (self.onload) {
-                    try { self.onload.call(self); } catch(e) {
-                        _pkjsLogs.push({level: 'error', msg: 'XHR onload error: ' + e});
-                    }
-                }
                 if (self.onreadystatechange) {
                     try { self.onreadystatechange.call(self); } catch(e) {
                         _pkjsLogs.push({level: 'error', msg: 'XHR onreadystatechange error: ' + e});
+                    }
+                }
+                if (self.onload) {
+                    try { self.onload.call(self); } catch(e) {
+                        _pkjsLogs.push({level: 'error', msg: 'XHR onload error: ' + e});
                     }
                 }
             }).catch(function(err) {
@@ -236,6 +386,47 @@ class PebbleJS(
                 }
             });
         };
+
+        // ========== WebSocket ==========
+        // Stub - WebSocket connections not available in bridge mode,
+        // but define the constructor so apps don't crash on reference.
+        function WebSocket(url, protocols) {
+            this.url = url;
+            this.readyState = 3; // CLOSED
+            this.bufferedAmount = 0;
+            this.extensions = '';
+            this.protocol = typeof protocols === 'string' ? protocols : '';
+            this.binaryType = 'blob';
+            this.onopen = null;
+            this.onerror = null;
+            this.onclose = null;
+            this.onmessage = null;
+            this.CONNECTING = 0;
+            this.OPEN = 1;
+            this.CLOSING = 2;
+            this.CLOSED = 3;
+            var self = this;
+            _pkjsLogs.push({level: 'warn', msg: '[pkjs] WebSocket not available in bridge mode: ' + url});
+            // Fire onerror and onclose asynchronously
+            setTimeout(function() {
+                if (self.onerror) {
+                    try { self.onerror({type: 'error'}); } catch(e) {}
+                }
+                if (self.onclose) {
+                    try { self.onclose({type: 'close', code: 1006, reason: 'Bridge mode', wasClean: false}); } catch(e) {}
+                }
+            }, 0);
+        }
+        WebSocket.prototype.send = function(data) {
+            throw new Error('WebSocket is not available in bridge mode');
+        };
+        WebSocket.prototype.close = function(code, reason) {
+            this.readyState = 3;
+        };
+        WebSocket.CONNECTING = 0;
+        WebSocket.OPEN = 1;
+        WebSocket.CLOSING = 2;
+        WebSocket.CLOSED = 3;
 
         // ========== Console override for log capture ==========
         var _origConsole = typeof console !== 'undefined' ? console : {};
@@ -267,16 +458,10 @@ class PebbleJS(
             }
         };
 
-        // ========== AppKeys mapping (injected from appinfo.json) ==========
-        var _appKeys = {}; // Will be set by Kotlin before loading app JS
-
         // ========== navigator.geolocation ==========
         var navigator = {
             geolocation: {
                 getCurrentPosition: function(success, error, options) {
-                    // Stub geolocation - calls error handler since bridge
-                    // doesn't have real GPS access. Apps should handle
-                    // the error gracefully (e.g. show mock data).
                     if (error) {
                         setTimeout(function() {
                             try {
@@ -294,14 +479,13 @@ class PebbleJS(
                     }
                 },
                 watchPosition: function(success, error, options) {
-                    // Not supported in bridge mode
                     return 0;
                 },
                 clearWatch: function(id) {}
             }
         };
 
-        // Helper: fire an event
+        // Helper: fire an event to all registered handlers
         function _pkjsFireEvent(eventName, eventData) {
             var handlers = _pkjsHandlers[eventName];
             if (!handlers) return;
@@ -409,6 +593,40 @@ class PebbleJS(
             jsContext?.close()
             jsContext = null
         } catch (_: Exception) {}
+    }
+
+    /**
+     * Trigger the 'showConfiguration' event. In the real Pebble app this
+     * opens the config page; here we just fire the event so the app's
+     * handler can call openURL().
+     */
+    fun triggerShowConfiguration() {
+        val ctx = jsContext ?: return
+        try {
+            ctx.eval("_pkjsFireEvent('showConfiguration', {type: 'showConfiguration'})")
+            drainPendingWork()
+        } catch (e: Exception) {
+            System.err.println("[pkjs] Error in showConfiguration: ${e.message}")
+        }
+    }
+
+    /**
+     * Trigger the 'webviewclosed' event with the given response string.
+     * The response is typically URL-encoded JSON from the config page.
+     */
+    fun triggerWebviewClosed(response: String) {
+        val ctx = jsContext ?: return
+        try {
+            val escaped = response
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+            ctx.eval("_pkjsFireEvent('webviewclosed', {type: 'webviewclosed', response: '$escaped'})")
+            drainPendingWork()
+        } catch (e: Exception) {
+            System.err.println("[pkjs] Error in webviewclosed: ${e.message}")
+        }
     }
 
     fun handleAppMessage(push: AppMessage.AppMessagePush) {
