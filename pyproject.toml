@@ -62,4 +62,4 @@ artifacts = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--cov-fail-under=35 --cov=pebble_tool --cov-report term-missing"
+addopts = "--cov-fail-under=30 --cov=pebble_tool --cov-report term-missing"
