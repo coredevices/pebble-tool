@@ -92,8 +92,14 @@ class InstallCommand(PebbleCommand):
         else:
             command = 'install'
 
+        extra_args = []
+        location = getattr(args, 'location', None)
+        if location:
+            extra_args.extend(['--location', location])
+
         print("Installing via libpebble3 bridge (QEMU port {})...".format(qemu_port))
-        rc = run_bridge(command, qemu_port, pbw_path=pbw, platform=platform)
+        rc = run_bridge(command, qemu_port, pbw_path=pbw, platform=platform,
+                        extra_args=extra_args or None)
 
         if rc != 0:
             raise ToolError("Bridge install failed (exit code {}).".format(rc))
@@ -104,6 +110,8 @@ class InstallCommand(PebbleCommand):
         parser.add_argument('pbw', help="Path to app to install.", nargs='?', default=None)
         parser.add_argument('--logs', action="store_true", help="Enable logs")
         parser.add_argument('--qemu_logs', action="store_true", help="Enable QEMU serial logs (emulator only)")
+        parser.add_argument('--location', default=None,
+                            help="Geolocation for PKJS: LAT,LON (e.g. 51.5074,-0.1278) or 'auto' for IP lookup")
         return parser
 
 

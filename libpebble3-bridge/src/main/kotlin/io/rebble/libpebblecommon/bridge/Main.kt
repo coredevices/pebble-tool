@@ -58,12 +58,15 @@ fun main(args: Array<String>) {
             bridge.streamLogs()
         }
         "install-and-logs" -> {
-            requireArgs(args, 4, "install-and-logs <qemu_port> <pbw_path> <platform>")
+            requireArgs(args, 4, "install-and-logs <qemu_port> <pbw_path> <platform> [--location LAT,LON|auto]")
+            val locationArg = args.indexOf("--location").let { idx ->
+                if (idx >= 0 && idx + 1 < args.size) args[idx + 1] else null
+            }
             val bridge = QemuBridge(args[1].toInt())
             bridge.connect()
             bridge.negotiate()
             bridge.installApp(args[2], args[3])
-            bridge.streamLogsWithPKJS(args[2], args[3])
+            bridge.streamLogsWithPKJS(args[2], args[3], locationArg)
         }
         "ping" -> {
             requireArgs(args, 2, "ping <qemu_port>")
@@ -205,7 +208,8 @@ fun printUsage() {
 
         Protocol Commands (require negotiation):
           install <port> <pbw> <platform>              Install app
-          install-and-logs <port> <pbw> <platform>     Install app and stream logs (with PKJS)
+          install-and-logs <port> <pbw> <platform> [--location LAT,LON|auto]
+                                                       Install app and stream logs (with PKJS)
           logs <port>                                    Stream logs
           ping <port>                                    Test connectivity
           screenshot <port>                              Capture screenshot (JSON on stdout)
@@ -735,7 +739,7 @@ class QemuBridge(private val port: Int) {
      * Stream logs with PKJS support. Extracts pebble-js-app.js from PBW
      * and runs it using Picaros (Boa engine), handling AppMessage bidirectionally.
      */
-    fun streamLogsWithPKJS(pbwPath: String, platform: String) {
+    fun streamLogsWithPKJS(pbwPath: String, platform: String, locationArg: String? = null) {
         System.err.println("[bridge] Streaming logs with PKJS support (Ctrl+C to stop)...")
         enableAppLogShipping()
 
@@ -771,7 +775,11 @@ class QemuBridge(private val port: Int) {
                     System.err.println("[bridge] Could not read appKeys: ${e.message}")
                 }
 
-                pkjs = PebbleJS(this, jsSource, meta.uuid, appKeys)
+                val (geoLat, geoLon) = PebbleJS.resolveLocation(locationArg)
+                if (locationArg == null) {
+                    System.err.println("[bridge] No --location specified, using default (Palo Alto: $geoLat, $geoLon)")
+                }
+                pkjs = PebbleJS(this, jsSource, meta.uuid, appKeys, geoLat, geoLon)
                 pkjs.start()
                 System.err.println("[bridge] PKJS runtime started for ${meta.appName} (from ${jsEntry.name})")
             } else {

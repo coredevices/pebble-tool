@@ -38,7 +38,7 @@ import kotlin.uuid.Uuid
  * - Pebble.showToast / postMessage
  * - XMLHttpRequest (real HTTP via fetch)
  * - WebSocket (real connections via Java)
- * - navigator.geolocation (canned coords: Palo Alto)
+ * - navigator.geolocation (configurable via --location LAT,LON or --location auto)
  * - localStorage (in-memory, full API)
  * - setTimeout / setInterval / clearTimeout / clearInterval
  * - console.log / info / warn / error / debug
@@ -47,8 +47,59 @@ class PebbleJS(
     private val bridge: QemuBridge,
     private val jsSource: String,
     private val appUuid: Uuid,
-    private val appKeys: Map<String, Int> = emptyMap()
+    private val appKeys: Map<String, Int> = emptyMap(),
+    private val geoLatitude: Double = DEFAULT_LATITUDE,
+    private val geoLongitude: Double = DEFAULT_LONGITUDE
 ) {
+    companion object {
+        const val DEFAULT_LATITUDE = 37.4419
+        const val DEFAULT_LONGITUDE = -122.1430
+
+        /**
+         * Resolve geolocation coordinates from a --location argument.
+         * Accepts "LAT,LON" or "auto" (IP-based lookup) or null (defaults).
+         */
+        fun resolveLocation(locationArg: String?): Pair<Double, Double> {
+            if (locationArg == null) {
+                return DEFAULT_LATITUDE to DEFAULT_LONGITUDE
+            }
+            if (locationArg.equals("auto", ignoreCase = true)) {
+                return lookupIpLocation()
+            }
+            // Parse "LAT,LON"
+            val parts = locationArg.split(",", limit = 2)
+            if (parts.size == 2) {
+                val lat = parts[0].trim().toDoubleOrNull()
+                val lon = parts[1].trim().toDoubleOrNull()
+                if (lat != null && lon != null) {
+                    return lat to lon
+                }
+            }
+            System.err.println("[pkjs] Invalid --location format: $locationArg (expected LAT,LON or auto)")
+            return DEFAULT_LATITUDE to DEFAULT_LONGITUDE
+        }
+
+        private fun lookupIpLocation(): Pair<Double, Double> {
+            try {
+                val conn = java.net.URI("http://ip-api.com/json/?fields=lat,lon").toURL()
+                    .openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
+                val body = conn.inputStream.bufferedReader().readText()
+                conn.disconnect()
+                val json = Json.parseToJsonElement(body).jsonObject
+                val lat = json["lat"]?.jsonPrimitive?.double
+                val lon = json["lon"]?.jsonPrimitive?.double
+                if (lat != null && lon != null) {
+                    System.err.println("[pkjs] IP geolocation: $lat, $lon")
+                    return lat to lon
+                }
+            } catch (e: Exception) {
+                System.err.println("[pkjs] IP geolocation lookup failed: ${e.message}")
+            }
+            return DEFAULT_LATITUDE to DEFAULT_LONGITUDE
+        }
+    }
     private var jsContext: JsContext? = null
     /** Active WebSocket connections managed on the Kotlin side */
     private val webSockets = mutableMapOf<Int, JavaWebSocket>()
@@ -650,8 +701,9 @@ class PebbleJS(
         };
 
         // ========== navigator.geolocation ==========
-        // Serves canned coordinates for Palo Alto, CA so apps get a
-        // realistic Position object through the success callback.
+        // Coordinates are injected from Kotlin (--location LAT,LON or auto).
+        var _geoLat = $geoLatitude;
+        var _geoLon = $geoLongitude;
         var _geoWatchCounter = 0;
         var _geoWatchers = {};
         var navigator = {
@@ -662,8 +714,8 @@ class PebbleJS(
                             if (success) {
                                 success({
                                     coords: {
-                                        latitude: 37.4419,
-                                        longitude: -122.1430,
+                                        latitude: _geoLat,
+                                        longitude: _geoLon,
                                         altitude: 30.0,
                                         accuracy: 25.0,
                                         altitudeAccuracy: 10.0,
@@ -687,8 +739,8 @@ class PebbleJS(
                             try {
                                 success({
                                     coords: {
-                                        latitude: 37.4419,
-                                        longitude: -122.1430,
+                                        latitude: _geoLat,
+                                        longitude: _geoLon,
                                         altitude: 30.0,
                                         accuracy: 25.0,
                                         altitudeAccuracy: 10.0,
