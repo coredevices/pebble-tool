@@ -37,7 +37,8 @@ import kotlin.uuid.Uuid
 class PebbleJS(
     private val bridge: QemuBridge,
     private val jsSource: String,
-    private val appUuid: Uuid
+    private val appUuid: Uuid,
+    private val appKeys: Map<String, Int> = emptyMap()
 ) {
     private var jsContext: JsContext? = null
     private var nextTransactionId: UByte = 1u
@@ -266,6 +267,40 @@ class PebbleJS(
             }
         };
 
+        // ========== AppKeys mapping (injected from appinfo.json) ==========
+        var _appKeys = {}; // Will be set by Kotlin before loading app JS
+
+        // ========== navigator.geolocation ==========
+        var navigator = {
+            geolocation: {
+                getCurrentPosition: function(success, error, options) {
+                    // Stub geolocation - calls error handler since bridge
+                    // doesn't have real GPS access. Apps should handle
+                    // the error gracefully (e.g. show mock data).
+                    if (error) {
+                        setTimeout(function() {
+                            try {
+                                error({
+                                    code: 2,
+                                    message: 'Position unavailable (bridge mode)',
+                                    PERMISSION_DENIED: 1,
+                                    POSITION_UNAVAILABLE: 2,
+                                    TIMEOUT: 3
+                                });
+                            } catch(e) {
+                                _pkjsLogs.push({level: 'error', msg: 'Geolocation error callback error: ' + e});
+                            }
+                        }, 0);
+                    }
+                },
+                watchPosition: function(success, error, options) {
+                    // Not supported in bridge mode
+                    return 0;
+                },
+                clearWatch: function(id) {}
+            }
+        };
+
         // Helper: fire an event
         function _pkjsFireEvent(eventName, eventData) {
             var handlers = _pkjsHandlers[eventName];
@@ -340,6 +375,15 @@ class PebbleJS(
 
             // Load the bootstrap polyfill
             jsContext!!.eval(bootstrapJS)
+
+            // Inject appKeys mapping from appinfo.json
+            if (appKeys.isNotEmpty()) {
+                val keysJs = appKeys.entries.joinToString(", ") { (k, v) ->
+                    "'${k.replace("'", "\\'")}': $v"
+                }
+                jsContext!!.eval("_appKeys = {$keysJs};")
+                System.err.println("[pkjs] Injected appKeys: $appKeys")
+            }
 
             // Load the app's JS
             try {
@@ -507,7 +551,13 @@ class PebbleJS(
             val tuples = mutableListOf<AppMessageTuple>()
 
             for ((keyStr, value) in dict) {
-                val key = keyStr.toUIntOrNull() ?: continue
+                // Resolve string keys using appKeys mapping, fall back to numeric parsing
+                val resolvedKey = appKeys[keyStr]?.toUInt() ?: keyStr.toUIntOrNull()
+                if (resolvedKey == null) {
+                    System.err.println("[pkjs] Unknown appKey: $keyStr (not in appKeys map and not numeric)")
+                    continue
+                }
+                val key = resolvedKey
 
                 val tuple = when {
                     value is JsonPrimitive && value.isString ->

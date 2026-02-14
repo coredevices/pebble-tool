@@ -6,6 +6,7 @@ import io.rebble.libpebblecommon.protocolhelpers.ProtocolEndpoint
 import io.rebble.libpebblecommon.structmapper.SUShort
 import io.rebble.libpebblecommon.structmapper.StructMapper
 import io.rebble.libpebblecommon.util.DataBuffer
+import kotlinx.serialization.json.*
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.Socket
@@ -705,7 +706,25 @@ class QemuBridge(private val port: Int) {
                 val meta = parseAppHeader(
                     zipFile.getInputStream(zipFile.getEntry("$platform/pebble-app.bin")).readBytes()
                 )
-                pkjs = PebbleJS(this, jsSource, meta.uuid)
+
+                // Read appKeys from appinfo.json if present
+                val appKeys = mutableMapOf<String, Int>()
+                try {
+                    val appInfoEntry = zipFile.getEntry("appinfo.json")
+                    if (appInfoEntry != null) {
+                        val appInfoJson = zipFile.getInputStream(appInfoEntry).bufferedReader().readText()
+                        val appInfo = Json.parseToJsonElement(appInfoJson).jsonObject
+                        val keys = appInfo["appKeys"]?.jsonObject
+                        keys?.forEach { (k, v) ->
+                            appKeys[k] = v.jsonPrimitive.int
+                        }
+                        System.err.println("[bridge] Read appKeys from appinfo.json: $appKeys")
+                    }
+                } catch (e: Exception) {
+                    System.err.println("[bridge] Could not read appKeys: ${e.message}")
+                }
+
+                pkjs = PebbleJS(this, jsSource, meta.uuid, appKeys)
                 pkjs.start()
                 System.err.println("[bridge] PKJS runtime started for ${meta.appName} (from ${jsEntry.name})")
             } else {
