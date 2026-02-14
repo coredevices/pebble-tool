@@ -15,7 +15,8 @@
       "Command": 0,
       "Temperature": 1,
       "City": 2,
-      "Status": 3
+      "Status": 3,
+      "E2EAck": 4
     },
     "resources": {
       "media": []

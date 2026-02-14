@@ -804,6 +804,12 @@ class QemuBridge(private val port: Int) {
                         ProtocolEndpoint.PING -> {
                             if (packet is PingPong) respondToPing(packet)
                         }
+                        ProtocolEndpoint.BLOBDB_V1 -> {
+                            if (packet is io.rebble.libpebblecommon.packets.blobdb.BlobResponse) {
+                                val status = packet.responseValue
+                                System.err.println("[bridge] E2E_BLOBDB_RESPONSE: $status")
+                            }
+                        }
                         else -> {}
                     }
                 }
