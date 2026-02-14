@@ -3,3 +3,8 @@
 build/
 pebble_tool.egg-info/
 .coverage
+
+# Prebuilt binaries - build these from source instead of committing
+pebble_tool/bridge/libpebble3-bridge-all.jar
+libpebble3-bridge/src/main/resources/linux-x86-64/liblibrary_rs.so
+libpebble3-bridge/build/

@@ -21,7 +21,14 @@ BRIDGE_JAR = os.path.join(os.path.dirname(__file__), 'libpebble3-bridge-all.jar'
 def get_bridge_jar():
     """Return the path to the bridge JAR, raising ToolError if not found."""
     if not os.path.exists(BRIDGE_JAR):
-        raise ToolError("libpebble3 bridge JAR not found at: {}".format(BRIDGE_JAR))
+        raise ToolError(
+            "libpebble3 bridge JAR not found at: {}\n"
+            "Build it with:\n"
+            "  cd libpebble3-bridge\n"
+            "  git submodule update --init --recursive\n"
+            "  gradle shadowJar\n"
+            "  cp build/libs/libpebble3-bridge-all.jar ../pebble_tool/bridge/".format(BRIDGE_JAR)
+        )
     return BRIDGE_JAR
 
 
