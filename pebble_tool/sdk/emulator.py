@@ -433,9 +433,10 @@ class ManagedEmulatorTransport(WebsocketTransport):
             "--qemu", "localhost:{}".format(self.qemu_port),
             "--port", str(self.pypkjs_port),
             "--persist", get_sdk_persist_dir(self.platform, self.version),
-            "--layout", layout_file,
             '--debug',
         ]
+        if os.path.exists(layout_file):
+            command.extend(["--layout", layout_file])
 
         account = get_default_account()
         if account.is_logged_in:
@@ -581,9 +582,10 @@ class ExternalQemuTransport(WebsocketTransport):
             "--qemu", "{}:{}".format(self.qemu_host, self.qemu_port),
             "--port", str(self.pypkjs_port),
             "--persist", get_sdk_persist_dir(self.platform, self.version),
-            "--layout", layout_file,
             '--debug',
         ]
+        if os.path.exists(layout_file):
+            command.extend(["--layout", layout_file])
 
         account = get_default_account()
         if account.is_logged_in:
