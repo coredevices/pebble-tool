@@ -12,7 +12,8 @@
     "sdkVersion": "${sdk_version}",
     "enableMultiJS": true,
     "targetPlatforms": [
-      "emery"
+      "emery",
+      "gabbro"
     ],
     "watchapp": {
       "watchface": true

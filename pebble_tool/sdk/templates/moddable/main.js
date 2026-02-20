@@ -21,4 +21,4 @@ function draw() {
 	render.end();
 }
 
-Pebble.addEventListener('secondchange', draw);
+watch.addEventListener('secondchange', draw);
