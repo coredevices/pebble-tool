@@ -1,0 +1,163 @@
+{
+  "runs": [
+    {
+      "app_name": "pkjstestharness",
+      "platform": "basalt",
+      "build_success": true,
+      "install_success": true,
+      "results": [
+        {
+          "api_name": "watch_log",
+          "passed": true,
+          "details": "init: PKJSTestHarness starting",
+          "source": "watch"
+        },
+        {
+          "api_name": "watch_log",
+          "passed": true,
+          "details": "init: complete, waiting for JS",
+          "source": "watch"
+        },
+        {
+          "api_name": "ready_event",
+          "passed": true,
+          "details": "type=ready",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "console",
+          "passed": true,
+          "details": "log/warn/error/info all available",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "performance_now",
+          "passed": true,
+          "details": "t1=503.5359859466553, t2=503.68499755859375",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "getActiveWatchInfo",
+          "passed": true,
+          "details": "platform=basalt, model=qemu_platform_basalt, fw=4.9.77, lang=en_US",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "getAccountToken",
+          "passed": true,
+          "details": "token=0123456789abcdef0123456789abcdef",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "getWatchToken",
+          "passed": true,
+          "details": "token=0123456789abcdef0123456789abcdef",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "localStorage",
+          "passed": true,
+          "details": "setGet=true, overwrite=true, remove=true, multi=true, clear=true, lengthSupported=false",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "setTimeout",
+          "passed": true,
+          "details": "elapsed=101ms",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "clearTimeout",
+          "passed": true,
+          "details": "cancelled_timer_fired=false",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "geolocation",
+          "passed": true,
+          "details": "lat=45.315499999999986, lng=-75.837",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "setInterval",
+          "passed": true,
+          "details": "count=3",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "clearInterval",
+          "passed": true,
+          "details": "interval_stopped_at_count=3",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "appmessage_watchready",
+          "passed": true,
+          "details": "Watch sent ready signal",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "sendAppMessage_txid",
+          "passed": true,
+          "details": "txid=null",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "appmessage_string",
+          "passed": true,
+          "details": "string_val=watch_ready",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "appmessage_event",
+          "passed": true,
+          "details": "type=AppMessage, has_payload=true",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "watch_log",
+          "passed": true,
+          "details": "WatchReady sent, result: 0",
+          "source": "watch"
+        },
+        {
+          "api_name": "watch_log",
+          "passed": true,
+          "details": "outbox_sent OK",
+          "source": "watch"
+        },
+        {
+          "api_name": "sendAppMessage",
+          "passed": true,
+          "details": "acked, txid=undefined",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "weather_fetch",
+          "passed": true,
+          "details": "temp=5, code=3, high=6, low=-5",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "weather_to_watch",
+          "passed": true,
+          "details": "weather sent to watch, temp=5",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "XMLHttpRequest",
+          "passed": true,
+          "details": "status=200, bodyLength=475",
+          "source": "pkjs"
+        },
+        {
+          "api_name": "XMLHttpRequest_json",
+          "passed": true,
+          "details": "parsed_ok, keys=9",
+          "source": "pkjs"
+        }
+      ],
+      "errors": []
+    }
+  ]
+}

@@ -29,7 +29,7 @@ from .commands.sdk.project import build
 
 from .commands.base import register_children
 from .commands import (install, logs, screenshot, timeline, emucontrol, ping, account, repl,
-                       transcription_server, data_logging)
+                       transcription_server, data_logging, publish)
 from .commands.sdk import create, emulator
 from .commands.sdk.project import package, analyse_size, convert, debug
 

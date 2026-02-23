@@ -71,9 +71,10 @@ class InstallCommand(PebbleCommand):
 
 
 class ToolAppInstaller(object):
-    def __init__(self, pebble, pbw=None):
+    def __init__(self, pebble, pbw=None, quiet=False):
         self.pebble = pebble
         self.pbw = pbw or 'build/{}.pbw'.format(os.path.basename(os.getcwd()))
+        self.quiet = quiet
         self.progress_bar = ProgressBar(widgets=[Percentage(), Bar(marker='=', left='[', right=']'), ' ',
                                                  FileTransferSpeed(), ' ', Timer(format='%s')])
 
@@ -96,7 +97,8 @@ class ToolAppInstaller(object):
 
     def _install_via_websocket(self, pebble, pbw):
         with open(pbw, 'rb') as f:
-            print("Installing app...")
+            if not self.quiet:
+                print("Installing app...")
             pebble.transport.send_packet(WebSocketInstallBundle(pbw=f.read()), target=MessageTargetPhone())
             try:
                 result = pebble.read_transport_message(MessageTargetPhone, WebSocketInstallStatus, timeout=300)
@@ -105,4 +107,5 @@ class ToolAppInstaller(object):
             if result.status != WebSocketInstallStatus.StatusCode.Success:
                 raise ToolError("App install failed.")
             else:
-                print("App install succeeded.")
+                if not self.quiet:
+                    print("App install succeeded.")

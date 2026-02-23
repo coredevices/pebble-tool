@@ -167,10 +167,6 @@ class ScreenshotCommand(PebbleCommand):
         transport = getattr(self.pebble, "transport", None)
         monitor_port = getattr(transport, "qemu_monitor_port", None)
         use_monitor_capture = bool(monitor_port)
-        if use_monitor_capture:
-            print("Capture mode: QEMU monitor screendump")
-        else:
-            print("Capture mode: watch screenshot (fallback)")
 
         temp_dir = tempfile.mkdtemp(prefix="pebble-screendump-")
         capture_start = time.perf_counter()
@@ -195,9 +191,6 @@ class ScreenshotCommand(PebbleCommand):
                 next_capture_time += frame_interval
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
-
-        capture_elapsed = time.perf_counter() - capture_start
-        actual_fps = (len(frames) / capture_elapsed) if capture_elapsed > 0 else 0.0
 
         output_dir = os.path.dirname(filename)
         if output_dir:
@@ -224,14 +217,12 @@ class ScreenshotCommand(PebbleCommand):
             disposal=2,
         )
         print("Saved rollover GIF to {}".format(filename))
-        print("Captured {} frames in {:.2f}s (actual {:.2f} fps)".format(
-            len(frames), capture_elapsed, actual_fps
-        ))
         # Intentionally do not auto-open GIFs in --gif-all-platforms mode.
 
     def _capture_gif_all_platforms(self, args):
         project, pbw_path = self._ensure_project_pbw(args)
         platforms, app_version = self._extract_pbw_metadata(pbw_path, project)
+        captured_files = []
 
         screenshots_dir = os.path.join(project.project_dir, "screenshots")
         os.makedirs(screenshots_dir, exist_ok=True)
@@ -240,29 +231,30 @@ class ScreenshotCommand(PebbleCommand):
         start_time = datetime.time(hour=10, minute=9, second=58)
         start_dt = now.replace(hour=start_time.hour, minute=start_time.minute, second=start_time.second, microsecond=0)
 
-        print("Using PBW: {}".format(pbw_path))
-        print("Platforms: {}".format(", ".join(platforms)))
-        print("App version: {}".format(app_version))
-        print("GIF start time: 10:09:58")
-
         for platform_name in platforms:
-            print("\n=== Capturing {} rollover GIF ===".format(platform_name))
+            print("Starting rollover GIF capture for {}...".format(platform_name))
             pebble = None
             previous_pebble = getattr(self, "pebble", None)
             try:
                 pebble = self._connect_emulator(platform_name, args.sdk, vnc_enabled=False)
                 self.pebble = pebble
-                ToolAppInstaller(pebble, pbw_path).install()
+                ToolAppInstaller(pebble, pbw_path, quiet=True).install()
                 filename = self._platform_filename(screenshots_dir, platform_name, app_version, extension="gif")
                 self._capture_rollover_gif(args, filename, start_dt)
+                captured_files.append(filename)
+            except Exception as e:
+                print("Failed GIF capture for {}: {}".format(platform_name, e))
+                raise
             finally:
                 self._close_pebble_connection(pebble)
                 self.pebble = previous_pebble
                 self._shutdown_platform_emulator(platform_name, args.sdk)
+        return captured_files
 
     def _capture_all_platforms(self, args):
         project, pbw_path = self._ensure_project_pbw(args)
         platforms, app_version = self._extract_pbw_metadata(pbw_path, project)
+        captured_files = []
 
         screenshots_dir = os.path.join(project.project_dir, "screenshots")
         os.makedirs(screenshots_dir, exist_ok=True)
@@ -284,10 +276,12 @@ class ScreenshotCommand(PebbleCommand):
                 filename = self._platform_filename(screenshots_dir, platform_name, app_version)
                 png.from_array(image, mode='RGBA;8').save(filename)
                 print("Saved screenshot to {}".format(filename))
+                captured_files.append(filename)
             finally:
                 self._close_pebble_connection(pebble)
                 self.pebble = previous_pebble
                 self._shutdown_platform_emulator(platform_name, args.sdk)
+        return captured_files
 
     def _connect_emulator(self, platform_name, sdk_version, vnc_enabled=False):
         transport = ManagedEmulatorTransport(platform_name, sdk_version, vnc_enabled)
