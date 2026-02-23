@@ -3,18 +3,33 @@ __author__ = 'katharine'
 
 import argparse
 import datetime
+import errno
 import itertools
+import json
+import os
 import png
 import os.path
+import re
 from progressbar import ProgressBar, Bar, ReverseBar, FileTransferSpeed, Timer, Percentage
+import signal
 import subprocess
 import sys
+import time
+import zipfile
 
+from libpebble2.communication import PebbleConnection
 from libpebble2.exceptions import ScreenshotError
 from libpebble2.services.screenshot import Screenshot
+from libpebble2.protocol.system import TimeMessage, SetUTC
 
-from .base import PebbleCommand
+from .base import PebbleCommand, BaseCommand
+from .install import ToolAppInstaller
+from pebble_tool.commands.sdk.project.build import BuildCommand
 from pebble_tool.exceptions import ToolError
+from pebble_tool.sdk.project import PebbleProject
+from pebble_tool.sdk import sdk_manager
+import pebble_tool.sdk.emulator as emulator
+from pebble_tool.sdk.emulator import ManagedEmulatorTransport
 
 
 def _positive_int(value):
@@ -40,10 +55,24 @@ class ScreenshotCommand(PebbleCommand):
         self.started = False
 
     def __call__(self, args):
+        if args.all_platforms:
+            BaseCommand.__call__(self, args)
+            self._capture_all_platforms(args)
+            return
+
         super(ScreenshotCommand, self).__call__(args)
+        image = self._grab_processed_image(args)
+
+        filename = self._generate_filename() if args.filename is None else args.filename
+        png.from_array(image, mode='RGBA;8').save(filename)
+        print("Saved screenshot to {}".format(filename))
+        if not args.no_open:
+            self._open(os.path.abspath(filename))
+
+    def _grab_processed_image(self, args):
         screenshot = Screenshot(self.pebble)
         screenshot.register_handler("progress", self._handle_progress)
-
+        self.started = False
         self.progress_bar.start()
         try:
             image = screenshot.grab_image()
@@ -59,12 +88,116 @@ class ScreenshotCommand(PebbleCommand):
         if args.scale > 1:
             image = self._scale_image(image, args.scale)
         self.progress_bar.finish()
+        return image
 
-        filename = self._generate_filename() if args.filename is None else args.filename
-        png.from_array(image, mode='RGBA;8').save(filename)
-        print("Saved screenshot to {}".format(filename))
-        if not args.no_open:
-            self._open(os.path.abspath(filename))
+    def _capture_all_platforms(self, args):
+        project, pbw_path = self._ensure_project_pbw(args)
+        platforms, app_version = self._extract_pbw_metadata(pbw_path, project)
+
+        screenshots_dir = os.path.join(project.project_dir, "screenshots")
+        os.makedirs(screenshots_dir, exist_ok=True)
+
+        print("Using PBW: {}".format(pbw_path))
+        print("Platforms: {}".format(", ".join(platforms)))
+        print("App version: {}".format(app_version))
+
+        for platform_name in platforms:
+            print("\n=== Capturing {} ===".format(platform_name))
+            pebble = None
+            previous_pebble = getattr(self, "pebble", None)
+            try:
+                pebble = self._connect_emulator(platform_name, args.sdk)
+                self.pebble = pebble
+                ToolAppInstaller(pebble, pbw_path).install()
+                self._set_time_1010(pebble)
+                image = self._grab_processed_image(args)
+                filename = self._platform_filename(screenshots_dir, platform_name, app_version)
+                png.from_array(image, mode='RGBA;8').save(filename)
+                print("Saved screenshot to {}".format(filename))
+            finally:
+                self.pebble = previous_pebble
+                self._shutdown_platform_emulator(platform_name, args.sdk)
+
+    def _connect_emulator(self, platform_name, sdk_version):
+        transport = ManagedEmulatorTransport(platform_name, sdk_version, False)
+        pebble = PebbleConnection(transport, **self._get_debug_args())
+        pebble.connect()
+        pebble.run_async()
+        return pebble
+
+    def _ensure_project_pbw(self, args):
+        try:
+            project = PebbleProject()
+        except Exception as e:
+            raise ToolError("This mode must be run from a Pebble project directory: {}".format(e))
+
+        pbw_path = os.path.join(project.project_dir, "build", "{}.pbw".format(os.path.basename(project.project_dir)))
+        if not os.path.exists(pbw_path):
+            print("PBW not found at {}. Building project first...".format(pbw_path))
+            build_args = argparse.Namespace(v=args.v, sdk=args.sdk, debug=False, args=[])
+            BuildCommand()(build_args)
+        if not os.path.exists(pbw_path):
+            raise ToolError("Expected PBW at {} after build, but it was not created.".format(pbw_path))
+        return project, pbw_path
+
+    @classmethod
+    def _extract_pbw_metadata(cls, pbw_path, project):
+        platforms = list(project.target_platforms)
+        version = project.version
+        try:
+            with zipfile.ZipFile(pbw_path) as zf:
+                for metadata_name in ("appinfo.json", "manifest.json"):
+                    if metadata_name in zf.namelist():
+                        with zf.open(metadata_name) as f:
+                            metadata = json.loads(f.read().decode("utf-8"))
+                        platforms = metadata.get("targetPlatforms", platforms)
+                        version = metadata.get("versionLabel", metadata.get("version", version))
+                        break
+        except (IOError, ValueError, zipfile.BadZipFile):
+            pass
+        return platforms, str(version)
+
+    @classmethod
+    def _sanitize_for_filename(cls, value):
+        return re.sub(r"[^A-Za-z0-9._-]+", "-", str(value)).strip("-") or "unknown"
+
+    @classmethod
+    def _platform_filename(cls, screenshots_dir, platform_name, app_version):
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        safe_version = cls._sanitize_for_filename(app_version)
+        safe_platform = cls._sanitize_for_filename(platform_name)
+        return os.path.join(screenshots_dir, "{}_{}_{}.png".format(safe_platform, safe_version, timestamp))
+
+    @classmethod
+    def _set_time_1010(cls, pebble):
+        now = datetime.datetime.now()
+        target = now.replace(hour=10, minute=10, second=0, microsecond=0)
+        ts = int(target.timestamp())
+        tz_offset = -time.altzone if time.localtime(ts).tm_isdst and time.daylight else -time.timezone
+        tz_offset_minutes = tz_offset // 60
+        tz_name = "UTC%+d" % (tz_offset_minutes // 60)
+        # Send twice with a short settle delay to make sure the rendered face reflects the new time.
+        pebble.send_packet(TimeMessage(message=SetUTC(unix_time=ts, utc_offset=tz_offset_minutes, tz_name=tz_name)))
+        time.sleep(0.35)
+        pebble.send_packet(TimeMessage(message=SetUTC(unix_time=ts, utc_offset=tz_offset_minutes, tz_name=tz_name)))
+        time.sleep(0.65)
+
+    @classmethod
+    def _shutdown_platform_emulator(cls, platform_name, sdk_version):
+        target_sdk = sdk_version or sdk_manager.get_current_sdk()
+        info = emulator.get_emulator_info(platform_name, target_sdk)
+        if info is None:
+            return
+        for key in ("qemu", "pypkjs", "websockify"):
+            pid = info.get(key, {}).get("pid")
+            if not pid:
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError as e:
+                if e.errno != errno.ESRCH:
+                    raise
+        emulator.update_emulator_info(platform_name, info["version"], None)
 
     def _handle_progress(self, progress, total):
         if not self.started:
@@ -224,6 +357,8 @@ class ScreenshotCommand(PebbleCommand):
         parser.add_argument('filename', nargs='?', type=str, help="Filename of screenshot")
         parser.add_argument('--no-correction', action="store_true", help="Disable colour correction.")
         parser.add_argument('--no-open', action="store_true", help="Disable automatic opening of image.")
+        parser.add_argument('--all-platforms', action='store_true',
+                            help="Build and capture screenshots on emulator for each platform supported by this app.")
         parser.add_argument('--scale', type=_positive_int, default=1,
                             help="Scale factor for the screenshot (must be a positive integer)")
         return parser
