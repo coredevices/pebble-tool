@@ -3,3 +3,6 @@
 build/
 pebble_tool.egg-info/
 .coverage
+.secrets/
+**/client_secret*.json
+**/*googleusercontent.com.json

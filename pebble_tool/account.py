@@ -179,6 +179,15 @@ class Account(object):
 
 
 def get_default_account():
+    return get_account(auth_provider=None)
+
+
+def get_account(auth_provider=None):
+    provider = auth_provider or os.getenv("PEBBLE_AUTH_PROVIDER", "legacy")
+    if provider == "firebase":
+        from pebble_tool.firebase_account import get_default_firebase_account
+        return get_default_firebase_account()
+
     path = os.path.join(get_persist_dir(), 'oauth')
     if not os.path.exists(path):
         os.makedirs(path)

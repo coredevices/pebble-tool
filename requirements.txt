@@ -17,5 +17,7 @@ colorama>=0.3.3
 packaging>=25.0
 pypkjs>=1.1.2
 freetype-py>=2.5.1
+google-auth>=2.0.0
+google-auth-oauthlib>=1.2.0
 websockify>=0.13.0
 cobs>=1.2.0
