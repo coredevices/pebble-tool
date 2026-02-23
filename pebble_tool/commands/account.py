@@ -1,8 +1,15 @@
 
 __author__ = 'katharine'
 
+import os
+
+import requests
+
 from .base import BaseCommand
 from pebble_tool.account import get_account, get_default_account
+
+
+DEFAULT_APPSTORE_API_BASE = "https://appstore-api.repebble.com"
 
 
 class LogInCommand(BaseCommand):
@@ -40,10 +47,43 @@ class LogInFirebaseCommand(BaseCommand):
         if getattr(args, "status", False):
             if account.is_logged_in:
                 creds = account.get_credentials() or {}
+                api_base = os.getenv("PEBBLE_APPSTORE_API_BASE", DEFAULT_APPSTORE_API_BASE).rstrip("/")
+                me_url = "{}/api/v1/developer/me".format(api_base)
+                link_status = "unknown"
+                link_error = None
+                try:
+                    response = requests.get(
+                        me_url,
+                        headers={"Authorization": "Bearer {}".format(account.get_access_token())},
+                        timeout=20,
+                    )
+                    try:
+                        payload = response.json()
+                    except ValueError:
+                        payload = {}
+                    if response.status_code == 403 and (payload.get("code") == "DEVELOPER_NOT_LINKED"):
+                        link_status = "not linked"
+                    elif response.status_code >= 400:
+                        link_status = "check failed"
+                        link_error = payload.get("error") or response.text[:200]
+                    else:
+                        developer = payload.get("developer") or {}
+                        if isinstance(developer, dict) and (developer.get("id") or developer.get("_id") or developer.get("firebase_uid")):
+                            link_status = "linked"
+                        else:
+                            link_status = "not linked"
+                except requests.RequestException as e:
+                    link_status = "check failed"
+                    link_error = str(e)
+
                 print("Firebase login status: logged in")
                 print("Email: {}".format(account.email or creds.get("email") or "unknown"))
                 print("Identity provider: {}".format(creds.get("identity_provider", "unknown")))
                 print("User ID: {}".format(account.id or creds.get("firebase_user_id") or "unknown"))
+                print("Appstore API base: {}".format(api_base))
+                print("Developer link: {}".format(link_status))
+                if link_error:
+                    print("Developer link error: {}".format(link_error))
             else:
                 print("Firebase login status: logged out")
             return

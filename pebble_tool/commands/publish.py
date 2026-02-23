@@ -5,9 +5,12 @@ import contextlib
 import json
 import mimetypes
 import os
+import random
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import zipfile
 
 import requests
@@ -61,6 +64,49 @@ class PublishCommand(BaseCommand):
             os.close(saved_out)
             os.close(saved_err)
 
+    @classmethod
+    def _post_with_wait_bar(cls, url, headers, data, files, timeout, label):
+        response_holder = {}
+        error_holder = {}
+        done = threading.Event()
+
+        def _worker():
+            try:
+                response_holder["response"] = requests.post(
+                    url,
+                    headers=headers,
+                    data=data,
+                    files=files,
+                    timeout=timeout,
+                )
+            except requests.RequestException as e:
+                error_holder["error"] = e
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+
+        width = 24
+        tick = 0
+        start = time.time()
+        while not done.wait(0.25):
+            pos = tick % width
+            bar = "".join("=" if i < pos else " " for i in range(width))
+            elapsed = int(time.time() - start)
+            sys.stdout.write("\r{} [{}] {:>3}s".format(label, bar, elapsed))
+            sys.stdout.flush()
+            tick += 1
+
+        elapsed = int(time.time() - start)
+        if tick:
+            sys.stdout.write("\r{} [{}] {:>3}s\n".format(label, "=" * width, elapsed))
+            sys.stdout.flush()
+
+        if "error" in error_holder:
+            raise ToolError("Request failed: {}".format(error_holder["error"]))
+        return response_holder["response"]
+
     def __call__(self, args):
         super(PublishCommand, self).__call__(args)
         colorama_init()
@@ -75,6 +121,20 @@ class PublishCommand(BaseCommand):
                 )
             firebase_id_token = account.get_access_token()
 
+        self._step("Appstore auth preflight...")
+        print("API base: {}".format(args.api_base))
+        me_payload = self._get_me_context(args.api_base, firebase_id_token)
+        if me_payload is None or not self._has_linked_developer(me_payload):
+            self._warn("No linked developer account found. Creating one now...")
+            self._create_developer(args.api_base, firebase_id_token)
+            me_payload = self._get_me_context(args.api_base, firebase_id_token)
+            if me_payload is None or not self._has_linked_developer(me_payload):
+                raise ToolError(
+                    "Developer account is not linked on {}. "
+                    "Run login-firebase again for this environment or verify backend data.".format(args.api_base)
+                )
+        self._ok("Developer link check successful.")
+
         self._build_project(args)
         project = PebbleProject()
         pbw_path = self._pbw_path_for_project(project)
@@ -82,6 +142,10 @@ class PublishCommand(BaseCommand):
             raise ToolError("Build completed but PBW was not found at {}".format(pbw_path))
 
         pbw_metadata = self._extract_pbw_metadata(pbw_path, project)
+        upload_pbw_path, normalized_uuid, temp_pbw_path = self._create_uuid_normalized_pbw(pbw_path)
+        if normalized_uuid and str(pbw_metadata.get("app_uuid")) != normalized_uuid:
+            self._warn("Normalizing PBW UUID casing for upload: {} -> {}".format(pbw_metadata.get("app_uuid"), normalized_uuid))
+            pbw_metadata["app_uuid"] = normalized_uuid
         desired_version = (
             (getattr(args, "version", None) or "").strip()
             or str(getattr(project, "version", "") or "").strip()
@@ -95,59 +159,58 @@ class PublishCommand(BaseCommand):
         print("Publish Version: {}".format(desired_version))
         print("Platforms: {}".format(", ".join(pbw_metadata["platforms"])))
 
-        me_payload = self._get_me_context(args.api_base, firebase_id_token)
-        if me_payload is None:
-            self._warn("No linked developer account found. Creating one now...")
-            self._create_developer(args.api_base, firebase_id_token)
-            me_payload = self._get_me_context(args.api_base, firebase_id_token)
-            if me_payload is None:
-                raise ToolError("Developer account creation completed, but /api/v1/developer/me still reports no linked developer.")
-
         app_lookup = ((me_payload.get("app_lookup") or {}).get("by_app_uuid") or {})
         app_id = self._lookup_app_id_case_insensitive(app_lookup, pbw_metadata["app_uuid"])
 
         gif_paths = []
         screenshot_paths = []
         resolved_app_id = None
-        if app_id:
-            self._ok("Resolved existing appstore app ID: {}".format(app_id))
-            gif_paths, screenshot_paths = self._collect_screenshot_assets(args, pbw_metadata, allow_skip=True)
-            self._step("Publishing release to Pebble Appstore...")
-            response_payload = self._upload_release(
-                api_base=args.api_base,
-                app_id=app_id,
-                firebase_id_token=firebase_id_token,
-                pbw_path=pbw_path,
-                version=desired_version,
-                release_notes=args.release_notes,
-                is_published=args.is_published,
-                gif_paths=gif_paths,
-                screenshot_paths=screenshot_paths,
-            )
-            resolved_app_id = app_id
-        else:
-            self._warn("No existing app mapping for UUID {}. Creating a new app...".format(pbw_metadata["app_uuid"]))
-            create_details = self._collect_new_app_details(args, pbw_metadata, me_payload, default_version=desired_version)
-            gif_paths, screenshot_paths = self._collect_screenshot_assets(args, pbw_metadata, allow_skip=False)
-            self._step("Publishing new app to Pebble Appstore...")
-            response_payload = self._create_app(
-                api_base=args.api_base,
-                firebase_id_token=firebase_id_token,
-                pbw_path=pbw_path,
-                pbw_metadata=pbw_metadata,
-                create_details=create_details,
-                release_notes=args.release_notes,
-                is_published=args.is_published,
-                gif_paths=gif_paths,
-                screenshot_paths=screenshot_paths,
-            )
-            resolved_app_id = self._extract_app_id(response_payload)
-            if not resolved_app_id:
-                me_after_create = self._get_me_context(args.api_base, firebase_id_token)
-                app_lookup_after = ((me_after_create or {}).get("app_lookup") or {}).get("by_app_uuid") or {}
-                resolved_app_id = self._lookup_app_id_case_insensitive(app_lookup_after, pbw_metadata["app_uuid"])
+        try:
+            if app_id:
+                self._ok("Resolved existing appstore app ID: {}".format(app_id))
+                gif_paths, screenshot_paths = self._collect_screenshot_assets(args, pbw_metadata, allow_skip=True)
+                self._step("Publishing release to Pebble Appstore...")
+                response_payload = self._upload_release(
+                    api_base=args.api_base,
+                    app_id=app_id,
+                    firebase_id_token=firebase_id_token,
+                    pbw_path=upload_pbw_path,
+                    version=desired_version,
+                    release_notes=args.release_notes,
+                    is_published=args.is_published,
+                    gif_paths=gif_paths,
+                    screenshot_paths=screenshot_paths,
+                )
+                resolved_app_id = app_id
+            else:
+                self._warn("No existing app mapping for UUID {}. Creating a new app...".format(pbw_metadata["app_uuid"]))
+                create_details = self._collect_new_app_details(args, pbw_metadata, me_payload, default_version=desired_version)
+                gif_paths, screenshot_paths = self._collect_screenshot_assets(args, pbw_metadata, allow_skip=False)
+                self._step("Publishing new app to Pebble Appstore...")
+                response_payload = self._create_app(
+                    api_base=args.api_base,
+                    firebase_id_token=firebase_id_token,
+                    pbw_path=upload_pbw_path,
+                    pbw_metadata=pbw_metadata,
+                    create_details=create_details,
+                    release_notes=args.release_notes,
+                    is_published=args.is_published,
+                    gif_paths=gif_paths,
+                    screenshot_paths=screenshot_paths,
+                )
+                resolved_app_id = self._extract_app_id(response_payload)
+                if not resolved_app_id:
+                    me_after_create = self._get_me_context(args.api_base, firebase_id_token)
+                    app_lookup_after = ((me_after_create or {}).get("app_lookup") or {}).get("by_app_uuid") or {}
+                    resolved_app_id = self._lookup_app_id_case_insensitive(app_lookup_after, pbw_metadata["app_uuid"])
 
-        self._print_upload_result(response_payload, resolved_app_id)
+            self._print_upload_result(response_payload, resolved_app_id)
+        finally:
+            if temp_pbw_path and os.path.exists(temp_pbw_path):
+                try:
+                    os.unlink(temp_pbw_path)
+                except OSError:
+                    pass
 
     def _build_project(self, args):
         self._step("Building app...")
@@ -207,6 +270,41 @@ class PublishCommand(BaseCommand):
         }
 
     @classmethod
+    def _create_uuid_normalized_pbw(cls, pbw_path):
+        with zipfile.ZipFile(pbw_path, "r") as src:
+            app_uuid = None
+            for metadata_name in ("appinfo.json", "manifest.json"):
+                if metadata_name not in src.namelist():
+                    continue
+                with src.open(metadata_name) as f:
+                    metadata = json.loads(f.read().decode("utf-8"))
+                if metadata.get("uuid"):
+                    app_uuid = str(metadata["uuid"])
+                    break
+
+            if not app_uuid:
+                return pbw_path, None, None
+            lower_uuid = app_uuid.lower()
+            if app_uuid == lower_uuid:
+                return pbw_path, lower_uuid, None
+
+            fd, tmp_path = tempfile.mkstemp(prefix="pebble-publish-", suffix=".pbw")
+            os.close(fd)
+            with zipfile.ZipFile(tmp_path, "w") as dst:
+                for info in src.infolist():
+                    data = src.read(info.filename)
+                    if info.filename in ("appinfo.json", "manifest.json"):
+                        try:
+                            meta = json.loads(data.decode("utf-8"))
+                            if meta.get("uuid"):
+                                meta["uuid"] = str(meta["uuid"]).lower()
+                                data = json.dumps(meta).encode("utf-8")
+                        except Exception:
+                            pass
+                    dst.writestr(info, data)
+            return tmp_path, lower_uuid, tmp_path
+
+    @classmethod
     def _request_json(cls, method, url, token, timeout=60, json_body=None):
         try:
             response = requests.request(
@@ -260,6 +358,13 @@ class PublishCommand(BaseCommand):
             )
 
     @classmethod
+    def _has_linked_developer(cls, me_payload):
+        developer = (me_payload or {}).get("developer") or {}
+        if not isinstance(developer, dict):
+            return False
+        return bool(developer.get("id") or developer.get("_id") or developer.get("firebase_uid"))
+
+    @classmethod
     def _platform_from_capture_path(cls, path):
         basename = os.path.basename(path)
         parts = basename.split("_", 1)
@@ -292,6 +397,7 @@ class PublishCommand(BaseCommand):
         screenshot_paths = []
         screenshot_command = ScreenshotCommand()
         screenshot_command._set_debugging(args.v)
+        random_start = "{:02d}:{:02d}:57".format(random.randint(0, 23), random.randint(0, 59))
         capture_args = argparse.Namespace(
             v=args.v,
             sdk=args.sdk,
@@ -299,6 +405,7 @@ class PublishCommand(BaseCommand):
             scale=1,
             no_open=True,
             gif_fps=10,
+            gif_start_time=random_start,
         )
         if args.capture_gif_all_platforms:
             self._step("Capturing GIF screenshots from emulator...")
@@ -421,14 +528,15 @@ class PublishCommand(BaseCommand):
             open_files.extend(cls._append_capture_files(files_payload, screenshot_paths))
 
             try:
-                response = requests.post(
-                    url,
+                response = cls._post_with_wait_bar(
+                    url=url,
                     headers={"Authorization": "Bearer {}".format(firebase_id_token)},
                     data=form_data,
                     files=files_payload,
                     timeout=300,
+                    label="Waiting for release upload response",
                 )
-            except requests.RequestException as e:
+            except ToolError as e:
                 raise ToolError("Release upload request failed: {}".format(e))
         finally:
             for handle in open_files:
@@ -505,6 +613,28 @@ class PublishCommand(BaseCommand):
             print("{}This field is required.{}".format(Fore.YELLOW, Style.RESET_ALL))
 
     @classmethod
+    def _normalize_category_value(cls, value):
+        if not value:
+            return None
+        raw = str(value).strip().lower()
+        aliases = {
+            "tools-utilities": "tools",
+            "tools_and_utilities": "tools",
+            "tool": "tools",
+            "health-fitness": "health",
+            "health_and_fitness": "health",
+            "fitness": "health",
+            "notification": "notifications",
+            "remote": "remotes",
+            "game": "games",
+        }
+        normalized = aliases.get(raw, raw)
+        allowed = {"daily", "tools", "notifications", "remotes", "health", "games"}
+        if normalized in allowed:
+            return normalized
+        return raw
+
+    @classmethod
     def _prompt_category_key(cls, me_payload, app_type):
         options = list((me_payload.get("app_category_options") or []))
         if app_type == "watchface":
@@ -518,13 +648,21 @@ class PublishCommand(BaseCommand):
                 for item in face_options
             ]
 
-        options = [opt for opt in options if opt.get("key")]
-        default_key = "tools" if any(opt.get("key") == "tools" for opt in options) else (options[0].get("key") if options else "tools")
+        normalized_options = []
+        for opt in options:
+            display_name = opt.get("name") or opt.get("key") or opt.get("id")
+            raw_value = opt.get("key") or opt.get("id") or opt.get("name")
+            normalized = cls._normalize_category_value(raw_value)
+            if not normalized:
+                continue
+            normalized_options.append({"name": display_name, "value": normalized})
+        options = normalized_options
+        default_key = "tools" if any(opt.get("value") == "tools" for opt in options) else (options[0].get("value") if options else "tools")
 
         if options:
             print("{}{}Choose a category (you can change this later).{}".format(Style.BRIGHT, Fore.BLUE, Style.RESET_ALL))
             for index, opt in enumerate(options, 1):
-                print("  {}) {} ({})".format(index, opt.get("name") or opt.get("key"), opt.get("key")))
+                print("  {}) {} ({})".format(index, opt.get("name") or opt.get("value"), opt.get("value")))
 
         while True:
             raw = input("Category [{}]: ".format(default_key)).strip()
@@ -533,10 +671,10 @@ class PublishCommand(BaseCommand):
             if raw.isdigit() and options:
                 idx = int(raw) - 1
                 if 0 <= idx < len(options):
-                    return options[idx]["key"]
+                    return options[idx]["value"]
                 print("{}Invalid category index.{}".format(Fore.YELLOW, Style.RESET_ALL))
                 continue
-            return raw.lower()
+            return cls._normalize_category_value(raw)
 
     @classmethod
     def _prompt_new_app_details(cls, pbw_metadata, me_payload, default_version=None):
@@ -595,10 +733,11 @@ class PublishCommand(BaseCommand):
                 }
                 for item in face_options
             ]
-        options = [opt for opt in options if opt.get("key")]
-        if any(opt.get("key") == "tools" for opt in options):
+        normalized_options = [cls._normalize_category_value(opt.get("key") or opt.get("id")) for opt in options]
+        normalized_options = [opt for opt in normalized_options if opt]
+        if any(opt == "tools" for opt in normalized_options):
             return "tools"
-        return options[0].get("key") if options else "tools"
+        return normalized_options[0] if normalized_options else "tools"
 
     @classmethod
     def _collect_new_app_details(cls, args, pbw_metadata, me_payload, default_version=None):
@@ -623,7 +762,7 @@ class PublishCommand(BaseCommand):
             "version": (getattr(args, "version", None) or default_version).strip(),
             "description": description,
             "source": (getattr(args, "source", None) or default_source).strip(),
-            "category": category.strip().lower() if category else None,
+            "category": cls._normalize_category_value(category.strip().lower()) if category else None,
             "icon_small_path": (getattr(args, "icon_small", None) or "").strip(),
             "icon_large_path": (getattr(args, "icon_large", None) or "").strip(),
         }
@@ -655,6 +794,16 @@ class PublishCommand(BaseCommand):
         }
         if create_details.get("category"):
             form_data["category"] = create_details["category"]
+        auto_generate_icons = (
+            pbw_metadata.get("app_type") == "watchapp"
+            and not create_details.get("icon_small_path")
+            and not create_details.get("icon_large_path")
+        )
+        if auto_generate_icons:
+            form_data["iconPrompt"] = "{}: {}".format(
+                create_details.get("name") or pbw_metadata.get("app_name") or "Pebble app",
+                create_details.get("description") or "",
+            ).strip()
 
         files_payload = []
         open_files = []
@@ -690,14 +839,15 @@ class PublishCommand(BaseCommand):
             open_files.extend(cls._append_capture_files(files_payload, screenshot_paths))
 
             try:
-                response = requests.post(
-                    url,
+                response = cls._post_with_wait_bar(
+                    url=url,
                     headers={"Authorization": "Bearer {}".format(firebase_id_token)},
                     data=form_data,
                     files=files_payload,
                     timeout=300,
+                    label="Waiting for app create response (icon generation may take ~2 min)",
                 )
-            except requests.RequestException as e:
+            except ToolError as e:
                 raise ToolError("App create request failed: {}".format(e))
         finally:
             for handle in open_files:

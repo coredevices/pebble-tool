@@ -77,6 +77,16 @@ class ScreenshotCommand(PebbleCommand):
         if not args.no_open:
             self._open(os.path.abspath(filename))
 
+    @classmethod
+    def _resolve_gif_start_dt(cls, args):
+        now = datetime.datetime.now()
+        raw = getattr(args, "gif_start_time", None) or "10:09:58"
+        try:
+            hh, mm, ss = [int(part) for part in str(raw).split(":")]
+            return now.replace(hour=hh, minute=mm, second=ss, microsecond=0)
+        except Exception:
+            raise ToolError("Invalid gif start time '{}'. Expected HH:MM:SS.".format(raw))
+
     def _grab_processed_image(self, args, show_progress=True, skip_colour_correction=False):
         screenshot = Screenshot(self.pebble)
         self.started = False
@@ -227,9 +237,7 @@ class ScreenshotCommand(PebbleCommand):
         screenshots_dir = os.path.join(project.project_dir, "screenshots")
         os.makedirs(screenshots_dir, exist_ok=True)
 
-        now = datetime.datetime.now()
-        start_time = datetime.time(hour=10, minute=9, second=58)
-        start_dt = now.replace(hour=start_time.hour, minute=start_time.minute, second=start_time.second, microsecond=0)
+        start_dt = self._resolve_gif_start_dt(args)
 
         for platform_name in platforms:
             print("Starting rollover GIF capture for {}...".format(platform_name))
