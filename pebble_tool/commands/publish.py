@@ -398,7 +398,7 @@ class PublishCommand(BaseCommand):
         form_data = {
             "version": version,
             "releaseNotes": release_notes or "",
-            "isPublished": "true" if is_published else "false",
+            "isPublished": "true",
             "replaceScreenshots": "false",
         }
 
@@ -744,7 +744,7 @@ class PublishCommand(BaseCommand):
     def _print_upload_result(self, response_payload, app_id=None):
         message = response_payload.get("message") or "Publish completed successfully"
         self._ok(message)
-        print("Dashboard: https://appstore-api.repebble.com/dashboard")
+        print("Visit the dashboard to add/edit your changelog: https://appstore-api.repebble.com/dashboard")
         if app_id:
             print("App page: https://apps.rePebble.com/{}".format(app_id))
 
