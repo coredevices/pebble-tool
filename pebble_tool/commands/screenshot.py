@@ -10,17 +10,21 @@ import os
 import png
 import os.path
 import re
+import socket
 from progressbar import ProgressBar, Bar, ReverseBar, FileTransferSpeed, Timer, Percentage
 import signal
 import subprocess
 import sys
+import tempfile
 import time
+import shutil
 import zipfile
+from PIL import Image
 
 from libpebble2.communication import PebbleConnection
 from libpebble2.exceptions import ScreenshotError
 from libpebble2.services.screenshot import Screenshot
-from libpebble2.protocol.system import TimeMessage, SetUTC
+from libpebble2.protocol.system import TimeMessage, SetLocaltime, SetUTC
 
 from .base import PebbleCommand, BaseCommand
 from .install import ToolAppInstaller
@@ -33,15 +37,12 @@ from pebble_tool.sdk.emulator import ManagedEmulatorTransport
 
 
 def _positive_int(value):
-    """Validate that the value is a positive integer."""
     try:
         ivalue = int(value)
     except ValueError:
         raise argparse.ArgumentTypeError(f"'{value}' is not a valid integer")
-
     if ivalue < 1:
-        raise argparse.ArgumentTypeError(f"'{value}' must be a positive integer (>= 1)")
-
+        raise argparse.ArgumentTypeError(f"'{value}' must be >= 1")
     return ivalue
 
 
@@ -55,6 +56,13 @@ class ScreenshotCommand(PebbleCommand):
         self.started = False
 
     def __call__(self, args):
+        if args.gif_all_platforms:
+            if args.all_platforms:
+                raise ToolError("--gif-all-platforms cannot be used with --all-platforms.")
+            BaseCommand.__call__(self, args)
+            self._capture_gif_all_platforms(args)
+            return
+
         if args.all_platforms:
             BaseCommand.__call__(self, args)
             self._capture_all_platforms(args)
@@ -69,11 +77,12 @@ class ScreenshotCommand(PebbleCommand):
         if not args.no_open:
             self._open(os.path.abspath(filename))
 
-    def _grab_processed_image(self, args):
+    def _grab_processed_image(self, args, show_progress=True, skip_colour_correction=False):
         screenshot = Screenshot(self.pebble)
-        screenshot.register_handler("progress", self._handle_progress)
         self.started = False
-        self.progress_bar.start()
+        if show_progress:
+            screenshot.register_handler("progress", self._handle_progress)
+            self.progress_bar.start()
         try:
             image = screenshot.grab_image()
         except ScreenshotError as e:
@@ -82,13 +91,174 @@ class ScreenshotCommand(PebbleCommand):
                 raise ToolError(str(e) + " (screenshots are known to be broken using firmware 3.2; try the emulator.)")
             else:
                 raise ToolError(str(e) + " (try rebooting the watch)")
-        if not args.no_correction:
+        if not args.no_correction and not skip_colour_correction:
             image = self._correct_colours(image)
         image = self._roundify(image)
-        if args.scale > 1:
-            image = self._scale_image(image, args.scale)
-        self.progress_bar.finish()
+        scale = getattr(args, 'scale', 1)
+        if scale > 1:
+            image = self._scale_image(image, scale)
+        if show_progress:
+            self.progress_bar.finish()
         return image
+
+    def _grab_pillow_image_fast(self):
+        screenshot = Screenshot(self.pebble)
+        try:
+            image = screenshot.grab_image()
+        except ScreenshotError as e:
+            if self.pebble.firmware_version.major == 3 and self.pebble.firmware_version.minor == 2:
+                raise ToolError(str(e) + " (screenshots are known to be broken using firmware 3.2; try the emulator.)")
+            else:
+                raise ToolError(str(e) + " (try rebooting the watch)")
+
+        if not image:
+            raise ToolError("No screenshot data received.")
+        height = len(image)
+        width = len(image[0]) // 3
+        data = bytearray()
+        for row in image:
+            data.extend(row)
+        return Image.frombytes("RGB", (width, height), bytes(data), "raw", "RGB").convert("RGBA")
+
+    @classmethod
+    def _qemu_monitor_command(cls, monitor_port, command, timeout=1.0):
+        with socket.create_connection(("127.0.0.1", int(monitor_port)), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            try:
+                sock.recv(4096)
+            except Exception:
+                pass
+            sock.sendall((command.rstrip() + "\n").encode("utf-8"))
+            try:
+                sock.recv(4096)
+            except Exception:
+                pass
+
+    @classmethod
+    def _grab_qemu_monitor_image_fast(cls, monitor_port, temp_dir, frame_index):
+        ppm_path = os.path.join(temp_dir, "frame_{:04d}.ppm".format(frame_index))
+        cls._qemu_monitor_command(monitor_port, "screendump {}".format(ppm_path), timeout=1.0)
+
+        deadline = time.time() + 0.75
+        while time.time() < deadline:
+            if os.path.exists(ppm_path) and os.path.getsize(ppm_path) > 0:
+                img = Image.open(ppm_path)
+                out = img.copy()
+                img.close()
+                return out.convert("RGBA")
+            time.sleep(0.01)
+        raise ToolError("Timed out waiting for screendump at {}".format(ppm_path))
+
+    def _capture_rollover_gif(self, args, filename, start_dt):
+        duration_seconds = 7
+        target_fps = args.gif_fps
+        frame_interval = 1.0 / float(target_fps)
+
+        frames = []
+        frame_timestamps = []
+        prime_dt = start_dt - datetime.timedelta(seconds=1)
+        # Prime time-setting a few times so the watch applies it before capture starts.
+        for _ in range(3):
+            self._set_time(pebble=self.pebble, target_datetime=prime_dt, use_localtime=False)
+            time.sleep(0.25)
+        # Let the watch tick into the requested start time naturally.
+        time.sleep(1.05)
+
+        transport = getattr(self.pebble, "transport", None)
+        monitor_port = getattr(transport, "qemu_monitor_port", None)
+        use_monitor_capture = bool(monitor_port)
+        if use_monitor_capture:
+            print("Capture mode: QEMU monitor screendump")
+        else:
+            print("Capture mode: watch screenshot (fallback)")
+
+        temp_dir = tempfile.mkdtemp(prefix="pebble-screendump-")
+        capture_start = time.perf_counter()
+        next_capture_time = capture_start
+        try:
+            while True:
+                now = time.perf_counter()
+                if now < next_capture_time:
+                    time.sleep(next_capture_time - now)
+                if time.perf_counter() - capture_start >= duration_seconds:
+                    break
+                if use_monitor_capture:
+                    try:
+                        frames.append(self._grab_qemu_monitor_image_fast(monitor_port, temp_dir, len(frames)))
+                    except Exception as e:
+                        print("Monitor capture failed ({}); falling back to watch screenshot.".format(e))
+                        use_monitor_capture = False
+                        frames.append(self._grab_pillow_image_fast())
+                else:
+                    frames.append(self._grab_pillow_image_fast())
+                frame_timestamps.append(time.perf_counter())
+                next_capture_time += frame_interval
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        capture_elapsed = time.perf_counter() - capture_start
+        actual_fps = (len(frames) / capture_elapsed) if capture_elapsed > 0 else 0.0
+
+        output_dir = os.path.dirname(filename)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+
+        if not frames:
+            raise ToolError("No frames captured for GIF.")
+
+        if len(frame_timestamps) > 1:
+            durations = [
+                max(20, int((frame_timestamps[i + 1] - frame_timestamps[i]) * 1000))
+                for i in range(len(frame_timestamps) - 1)
+            ]
+            durations.append(durations[-1])
+        else:
+            durations = [1000]
+
+        frames[0].save(
+            filename,
+            save_all=True,
+            append_images=frames[1:],
+            duration=durations,
+            loop=0,
+            disposal=2,
+        )
+        print("Saved rollover GIF to {}".format(filename))
+        print("Captured {} frames in {:.2f}s (actual {:.2f} fps)".format(
+            len(frames), capture_elapsed, actual_fps
+        ))
+        # Intentionally do not auto-open GIFs in --gif-all-platforms mode.
+
+    def _capture_gif_all_platforms(self, args):
+        project, pbw_path = self._ensure_project_pbw(args)
+        platforms, app_version = self._extract_pbw_metadata(pbw_path, project)
+
+        screenshots_dir = os.path.join(project.project_dir, "screenshots")
+        os.makedirs(screenshots_dir, exist_ok=True)
+
+        now = datetime.datetime.now()
+        start_time = datetime.time(hour=10, minute=9, second=58)
+        start_dt = now.replace(hour=start_time.hour, minute=start_time.minute, second=start_time.second, microsecond=0)
+
+        print("Using PBW: {}".format(pbw_path))
+        print("Platforms: {}".format(", ".join(platforms)))
+        print("App version: {}".format(app_version))
+        print("GIF start time: 10:09:58")
+
+        for platform_name in platforms:
+            print("\n=== Capturing {} rollover GIF ===".format(platform_name))
+            pebble = None
+            previous_pebble = getattr(self, "pebble", None)
+            try:
+                pebble = self._connect_emulator(platform_name, args.sdk, vnc_enabled=False)
+                self.pebble = pebble
+                ToolAppInstaller(pebble, pbw_path).install()
+                filename = self._platform_filename(screenshots_dir, platform_name, app_version, extension="gif")
+                self._capture_rollover_gif(args, filename, start_dt)
+            finally:
+                self._close_pebble_connection(pebble)
+                self.pebble = previous_pebble
+                self._shutdown_platform_emulator(platform_name, args.sdk)
 
     def _capture_all_platforms(self, args):
         project, pbw_path = self._ensure_project_pbw(args)
@@ -115,11 +285,12 @@ class ScreenshotCommand(PebbleCommand):
                 png.from_array(image, mode='RGBA;8').save(filename)
                 print("Saved screenshot to {}".format(filename))
             finally:
+                self._close_pebble_connection(pebble)
                 self.pebble = previous_pebble
                 self._shutdown_platform_emulator(platform_name, args.sdk)
 
-    def _connect_emulator(self, platform_name, sdk_version):
-        transport = ManagedEmulatorTransport(platform_name, sdk_version, False)
+    def _connect_emulator(self, platform_name, sdk_version, vnc_enabled=False):
+        transport = ManagedEmulatorTransport(platform_name, sdk_version, vnc_enabled)
         pebble = PebbleConnection(transport, **self._get_debug_args())
         pebble.connect()
         pebble.run_async()
@@ -162,24 +333,32 @@ class ScreenshotCommand(PebbleCommand):
         return re.sub(r"[^A-Za-z0-9._-]+", "-", str(value)).strip("-") or "unknown"
 
     @classmethod
-    def _platform_filename(cls, screenshots_dir, platform_name, app_version):
+    def _platform_filename(cls, screenshots_dir, platform_name, app_version, extension="png"):
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         safe_version = cls._sanitize_for_filename(app_version)
         safe_platform = cls._sanitize_for_filename(platform_name)
-        return os.path.join(screenshots_dir, "{}_{}_{}.png".format(safe_platform, safe_version, timestamp))
+        return os.path.join(screenshots_dir, "{}_{}_{}.{}".format(safe_platform, safe_version, timestamp, extension))
+
+    @classmethod
+    def _set_time(cls, pebble, target_datetime, use_localtime=False):
+        target = target_datetime.replace(microsecond=0)
+        ts = int(target.timestamp())
+        if use_localtime:
+            pebble.send_packet(TimeMessage(message=SetLocaltime(time=ts)))
+            return
+        tz_offset = -time.altzone if time.localtime(ts).tm_isdst and time.daylight else -time.timezone
+        tz_offset_minutes = tz_offset // 60
+        tz_name = "UTC%+d" % (tz_offset_minutes // 60)
+        pebble.send_packet(TimeMessage(message=SetUTC(unix_time=ts, utc_offset=tz_offset_minutes, tz_name=tz_name)))
 
     @classmethod
     def _set_time_1010(cls, pebble):
         now = datetime.datetime.now()
         target = now.replace(hour=10, minute=10, second=0, microsecond=0)
-        ts = int(target.timestamp())
-        tz_offset = -time.altzone if time.localtime(ts).tm_isdst and time.daylight else -time.timezone
-        tz_offset_minutes = tz_offset // 60
-        tz_name = "UTC%+d" % (tz_offset_minutes // 60)
         # Send twice with a short settle delay to make sure the rendered face reflects the new time.
-        pebble.send_packet(TimeMessage(message=SetUTC(unix_time=ts, utc_offset=tz_offset_minutes, tz_name=tz_name)))
+        cls._set_time(pebble, target)
         time.sleep(0.35)
-        pebble.send_packet(TimeMessage(message=SetUTC(unix_time=ts, utc_offset=tz_offset_minutes, tz_name=tz_name)))
+        cls._set_time(pebble, target)
         time.sleep(0.65)
 
     @classmethod
@@ -198,6 +377,18 @@ class ScreenshotCommand(PebbleCommand):
                 if e.errno != errno.ESRCH:
                     raise
         emulator.update_emulator_info(platform_name, info["version"], None)
+
+    @classmethod
+    def _close_pebble_connection(cls, pebble):
+        if not pebble:
+            return
+        ws = getattr(getattr(pebble, "transport", None), "ws", None)
+        if ws is None:
+            return
+        try:
+            ws.close()
+        except Exception:
+            pass
 
     def _handle_progress(self, progress, total):
         if not self.started:
@@ -357,8 +548,10 @@ class ScreenshotCommand(PebbleCommand):
         parser.add_argument('filename', nargs='?', type=str, help="Filename of screenshot")
         parser.add_argument('--no-correction', action="store_true", help="Disable colour correction.")
         parser.add_argument('--no-open', action="store_true", help="Disable automatic opening of image.")
+        parser.add_argument('--gif-all-platforms', action='store_true',
+                            help="Build and capture a rollover GIF on emulator for each platform supported by this app.")
+        parser.add_argument('--gif-fps', type=_positive_int, default=10,
+                            help="FPS cap for --gif-all-platforms capture (default: 10).")
         parser.add_argument('--all-platforms', action='store_true',
                             help="Build and capture screenshots on emulator for each platform supported by this app.")
-        parser.add_argument('--scale', type=_positive_int, default=1,
-                            help="Scale factor for the screenshot (must be a positive integer)")
         return parser

@@ -125,6 +125,15 @@ class ManagedEmulatorTransport(WebsocketTransport):
                 self.qemu_serial_port = info['qemu']['serial']
                 self.qemu_pid = info['qemu']['pid']
                 self.qemu_gdb_port = info['qemu'].get('gdb', None)
+                self.qemu_monitor_port = info['qemu'].get('monitor', None)
+                # Old emulator metadata may not include a monitor port; force respawn in that case.
+                if self.qemu_monitor_port is None:
+                    logger.info("Killing existing QEMU because monitor port metadata is missing.")
+                    os.kill(info['qemu']['pid'], signal.SIGKILL)
+                    if self._is_pid_running(info['pypkjs']['pid']):
+                        os.kill(info['pypkjs']['pid'], signal.SIGKILL)
+                    qemu_running = False
+                    self.qemu_pid = None
             else:
                 # Kill existing QEMU if VNC state doesn't match
                 if self._is_pid_running(info['qemu']['pid']) and existing_vnc != self.vnc_enabled:
@@ -173,6 +182,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
             self.qemu_port = self._choose_port()
             self.qemu_serial_port = self._choose_port()
             self.qemu_gdb_port = self._choose_port()
+            self.qemu_monitor_port = self._choose_port()
 
         if self.pypkjs_pid is None:
             self.pypkjs_port = self._choose_port()
@@ -229,6 +239,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
                 'port': self.qemu_port,
                 'serial': self.qemu_serial_port,
                 'gdb': self.qemu_gdb_port,
+                'monitor': self.qemu_monitor_port,
                 'vnc': self.vnc_enabled,
             },
             'pypkjs': {
@@ -263,6 +274,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
             "-serial", "tcp::{},server,nowait".format(self.qemu_serial_port),
             "-pflash", qemu_micro_flash,
             "-gdb", "tcp::{},server,nowait".format(self.qemu_gdb_port),
+            "-monitor", "tcp::{},server,nowait".format(self.qemu_monitor_port),
         ]
 
         if self.vnc_enabled:
