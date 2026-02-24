@@ -6,43 +6,18 @@ import os
 import requests
 
 from .base import BaseCommand
-from pebble_tool.account import get_account, get_default_account
+from pebble_tool.account import get_account
 
 
 DEFAULT_APPSTORE_API_BASE = "https://appstore-api.repebble.com"
 
 
 class LogInCommand(BaseCommand):
-    """Logs you in to your Pebble account. Required to use the timeline and CloudPebble connections."""
+    """Logs you in using Firebase auth. Required for CloudPebble and publish flows."""
     command = 'login'
 
     def __call__(self, args):
         super(LogInCommand, self).__call__(args)
-        account = get_default_account()
-        if hasattr(args, 'token') and args.token:
-            account.login_with_token(args.token)
-            print("Successfully logged in with provided token.")
-        else:
-            account.login(args)
-
-    @classmethod
-    def add_parser(cls, parser):
-        parser = super(LogInCommand, cls).add_parser(parser)
-        parser.add_argument('--token', type=str, help='Access token to use for authentication instead of OAuth flow')
-        parser.add_argument('--auth_host_name', type=str, default='localhost')
-        parser.add_argument('--auth_host_port', type=int, nargs='?', default=[60000])
-        parser.add_argument('--logging_level', type=str, default='ERROR')
-        parser.add_argument('--noauth_local_webserver', action='store_true', default=False,
-                            help="Try this flag if the standard authentication isn't working.")
-        return parser
-
-
-class LogInFirebaseCommand(BaseCommand):
-    """Logs you in using Firebase auth. Experimental drop-in replacement path for `login`."""
-    command = 'login-firebase'
-
-    def __call__(self, args):
-        super(LogInFirebaseCommand, self).__call__(args)
         account = get_account(auth_provider="firebase")
         if getattr(args, "status", False):
             if account.is_logged_in:
@@ -95,7 +70,7 @@ class LogInFirebaseCommand(BaseCommand):
 
     @classmethod
     def add_parser(cls, parser):
-        parser = super(LogInFirebaseCommand, cls).add_parser(parser)
+        parser = super(LogInCommand, cls).add_parser(parser)
         parser.add_argument("--status", action="store_true", default=False,
                             help="Show Firebase login status and exit.")
         parser.add_argument("--provider", choices=["google", "github"], default=None,
@@ -130,8 +105,11 @@ class LogOutCommand(BaseCommand):
 
     def __call__(self, args):
         super(LogOutCommand, self).__call__(args)
-        account = get_default_account()
-        if account.is_logged_in:
-            account.logout()
-        else:
+        logged_in_any = False
+        for provider in ("firebase", "legacy"):
+            account = get_account(auth_provider=provider)
+            if account.is_logged_in:
+                account.logout()
+                logged_in_any = True
+        if not logged_in_any:
             print("You aren't logged in anyway.")

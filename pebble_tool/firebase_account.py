@@ -138,7 +138,7 @@ class FirebaseAccount(object):
     def get_access_token(self):
         creds = self.get_credentials()
         if not creds or not creds.get("id_token"):
-            raise ToolError("Not logged in. Run 'pebble login-firebase'.")
+            raise ToolError("Not logged in. Run 'pebble login'.")
         return creds["id_token"]
 
     bearer_token = property(get_access_token)

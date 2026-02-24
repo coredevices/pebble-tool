@@ -116,7 +116,7 @@ class PublishCommand(BaseCommand):
             account = get_account(auth_provider="firebase")
             if not account.is_logged_in:
                 raise ToolError(
-                    "Not logged in with Firebase. Run 'pebble login-firebase' first, "
+                    "Not logged in with Firebase. Run 'pebble login' first, "
                     "or pass --firebase-id-token / set PEBBLE_FIREBASE_ID_TOKEN for CI."
                 )
             firebase_id_token = account.get_access_token()
@@ -131,7 +131,7 @@ class PublishCommand(BaseCommand):
             if me_payload is None or not self._has_linked_developer(me_payload):
                 raise ToolError(
                     "Developer account is not linked on {}. "
-                    "Run login-firebase again for this environment or verify backend data.".format(args.api_base)
+                    "Run pebble login again for this environment or verify backend data.".format(args.api_base)
                 )
         self._ok("Developer link check successful.")
 
