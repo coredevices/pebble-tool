@@ -2,6 +2,7 @@
 __author__ = 'cherie'
 
 import argparse
+import datetime
 import time
 
 from libpebble2.communication.transports.websocket import MessageTargetPhone
@@ -10,6 +11,7 @@ from libpebble2.communication.transports.websocket.protocol import WebSocketPhon
 from libpebble2.communication.transports.websocket.protocol import WebSocketPhonesimConfigResponse, WebSocketRelayQemu
 from libpebble2.communication.transports.qemu.protocol import *
 from libpebble2.communication.transports.qemu import MessageTargetQemu, QemuTransport
+from libpebble2.protocol.system import TimeMessage, SetUTC
 import math
 import os
 
@@ -278,6 +280,74 @@ class EmuTimeFormatCommand(PebbleCommand):
         parser = super(EmuTimeFormatCommand, cls).add_parser(parser)
         parser.add_argument('--format', choices=['12h', '24h'],
                             help="Set the time format of the emulator")
+        return parser
+
+
+class EmuSetTimeCommand(PebbleCommand):
+    """Sets the emulated watch time."""
+    command = 'emu-set-time'
+    valid_connections = {'qemu', 'emulator'}
+
+    @classmethod
+    def _send_time_packet(cls, pebble, ts, use_utc):
+        if use_utc:
+            pebble.send_packet(TimeMessage(message=SetUTC(unix_time=ts, utc_offset=0, tz_name="UTC")))
+            return
+
+        is_dst = time.localtime(ts).tm_isdst and time.daylight
+        tz_offset_seconds = -time.altzone if is_dst else -time.timezone
+        tz_offset_minutes = int(tz_offset_seconds // 60)
+        tz_name = "UTC{:+d}".format(int(tz_offset_minutes // 60))
+        pebble.send_packet(
+            TimeMessage(
+                message=SetUTC(
+                    unix_time=ts,
+                    utc_offset=tz_offset_minutes,
+                    tz_name=tz_name,
+                )
+            )
+        )
+
+    @classmethod
+    def _parse_input_time(cls, raw_value, use_utc):
+        value = raw_value.strip()
+        if value.isdigit():
+            return int(value)
+
+        try:
+            hour, minute, second = [int(part) for part in value.split(":", 2)]
+        except (TypeError, ValueError):
+            raise ToolError("Invalid time '{}'. Use HH:MM:SS or Unix UTC seconds.".format(raw_value))
+
+        if not (0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59):
+            raise ToolError("Invalid time '{}'. Use HH:MM:SS or Unix UTC seconds.".format(raw_value))
+
+        if use_utc:
+            now = datetime.datetime.utcnow()
+            dt = datetime.datetime(now.year, now.month, now.day, hour, minute, second, tzinfo=datetime.timezone.utc)
+        else:
+            now = datetime.datetime.now()
+            dt = datetime.datetime(now.year, now.month, now.day, hour, minute, second)
+        return int(dt.timestamp())
+
+    def __call__(self, args):
+        super(EmuSetTimeCommand, self).__call__(args)
+        ts = self._parse_input_time(args.time, args.utc)
+        self._send_time_packet(self.pebble, ts, args.utc)
+
+    @classmethod
+    def add_parser(cls, parser):
+        parser = super(EmuSetTimeCommand, cls).add_parser(parser)
+        parser.add_argument(
+            "time",
+            help="Target time as HH:MM:SS (today) or Unix UTC seconds.",
+        )
+        parser.add_argument(
+            "--utc",
+            action="store_true",
+            default=False,
+            help="Interpret HH:MM:SS as UTC (default: local time). Ignored for Unix seconds.",
+        )
         return parser
 
 

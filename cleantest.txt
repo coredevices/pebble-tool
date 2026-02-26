@@ -1,0 +1,74 @@
+# Clean machine test log — picaros-runner install + PBW test
+# Machine: picaros-test.exe.xyz
+# Date: 2026-02-14
+# PBW: poketrainer.pbw
+
+## 1. Add host key + verify machine state
+ssh-keyscan picaros-test.exe.xyz >> ~/.ssh/known_hosts
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "uname -a; whoami; which rustc; which pebble; which picaros-runner"
+# Result: Linux x86_64, user=exedev, no rustc, no pebble, no picaros-runner
+
+## 2. Install Rust
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+# Result: rustc 1.93.1 installed
+
+## 3. Create directories
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "mkdir -p ~/dev ~/Downloads ~/.local/bin"
+
+## 4. Rsync repos + PBW
+rsync -az --delete -e "ssh -i ~/.ssh/id_exe" /Users/eric/dev/picaros/ picaros-test.exe.xyz:~/dev/picaros/ --exclude target/
+rsync -az --delete -e "ssh -i ~/.ssh/id_exe" /Users/eric/dev/pebble-tool/ picaros-test.exe.xyz:~/dev/pebble-tool/ --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.git' --exclude 'node_modules'
+scp -i ~/.ssh/id_exe ~/Downloads/poketrainer.pbw picaros-test.exe.xyz:~/Downloads/
+
+## 5. Install build deps (openssl-dev needed for ureq -> native-tls -> openssl-sys)
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "sudo apt-get update -qq && sudo apt-get install -y libssl-dev pkg-config"
+
+## 6. Build picaros-runner
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "source ~/.cargo/env && cd ~/dev/picaros && cargo build --release -p picaros-runner"
+# Result: compiled in ~2m43s, 7 warnings (unused code), success
+
+## 7. Install picaros-runner to PATH
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "cp ~/dev/picaros/target/release/picaros-runner ~/.local/bin/"
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "sudo cp ~/dev/picaros/target/release/picaros-runner /usr/local/bin/"
+
+## 8. Install pebble-tool
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "cd ~/dev/pebble-tool && python3 -m venv .venv && source .venv/bin/activate && pip install -e ."
+# Result: pebble-tool 5.0.23 installed with all deps
+
+## 9. Install Node.js (needed for SDK)
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs"
+# Result: node v20.20.0, npm 10.8.2
+
+## 10. Install Pebble SDK
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "source ~/dev/pebble-tool/.venv/bin/activate && pebble sdk install 4.9.77"
+# Result: SDK 4.9.77 installed
+
+## 11. Symlink qemu-pebble to PATH
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "sudo ln -sf ~/.pebble-sdk/SDKs/4.9.77/toolchain/bin/qemu-pebble /usr/local/bin/qemu-pebble"
+
+## 12. Test PBW install (--vnc for headless server)
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "source ~/dev/pebble-tool/.venv/bin/activate && export PATH=\$HOME/.local/bin:\$PATH && cd /tmp && PYTHONUNBUFFERED=1 timeout 60 pebble install --emulator basalt --vnc --logs -vvv ~/Downloads/poketrainer.pbw"
+# Result: SUCCESS
+#   - QEMU booted firmware
+#   - picaros-runner connected to QEMU
+#   - WebSocket server started
+#   - PBW received (272420 bytes), JS extracted (144537 bytes)
+#   - App: Poke Trainer (4757df8f-bef9-459e-884b-b0442098a079)
+#   - "App install succeeded."
+#   - JS runtime error: "ReferenceError: window is not defined" (at :362:1)
+#     (poketrainer uses `window` global which picaros-core doesn't provide yet)
+#   - websockify proxying VNC on port 6080 -> localhost:5901
+
+## 13. Install noVNC for web-based VNC access
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "sudo apt-get install -y novnc"
+# noVNC files at /usr/share/novnc/
+
+## 14. Kill stale processes and fresh install
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "kill <pids>; sleep 1"
+ssh -i ~/.ssh/id_exe picaros-test.exe.xyz "source ~/dev/pebble-tool/.venv/bin/activate && export PATH=\$HOME/.local/bin:\$PATH && cd /tmp && PYTHONUNBUFFERED=1 timeout 90 pebble install --emulator basalt --vnc --logs ~/Downloads/poketrainer.pbw"
+# Result: "App install succeeded." — visible via VNC
+
+## Ports for exe.dev proxy (VNC access)
+# VNC direct:  5901
+# noVNC (web): 6080
+# Use: ssh exe.dev share port picaros-test 6080
