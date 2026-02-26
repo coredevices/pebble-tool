@@ -55,7 +55,7 @@ class CloudPebbleTransport(WebsocketTransport):
         if token_length > 65535:
             raise ToolError("Firebase token is too large for CloudPebble proxy v2 auth frame.")
         frame = bytearray(3 + token_length)
-        frame[0] = 0x0A
+        frame[0] = 0x19
         frame[1] = token_length // 256
         frame[2] = token_length % 256
         frame[3:] = token_bytes
