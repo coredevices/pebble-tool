@@ -18,19 +18,6 @@ class _FakeResponse:
         return self._payload
 
 
-class _FakeCreds:
-    def __init__(self, id_token):
-        self.id_token = id_token
-
-
-class _FakeFlow:
-    def __init__(self, id_token):
-        self._id_token = id_token
-
-    def run_local_server(self, **kwargs):
-        return _FakeCreds(self._id_token)
-
-
 def test_firebase_login_with_token_and_user_info(tmp_path, monkeypatch):
     account = FirebaseAccount(str(tmp_path))
 
@@ -71,42 +58,44 @@ def test_firebase_refreshes_expired_token(tmp_path, monkeypatch):
     assert creds["firebase_user_id"] == "new-user-id"
 
 
-def test_firebase_login_via_google_oauth_flow(tmp_path, monkeypatch):
+def test_firebase_login_via_dashboard_session_broker_flow(tmp_path, monkeypatch):
     account = FirebaseAccount(str(tmp_path))
 
-    def fake_from_client_config(client_config, scopes):
-        return _FakeFlow("google-id-token")
+    def fake_broker_auth(args):
+        return "firebase-custom-token"
 
     def fake_post(url, data=None, json=None, timeout=None):
+        if "signInWithCustomToken" in url:
+            return _FakeResponse({
+                "idToken": "firebase-id-token",
+                "refreshToken": "firebase-refresh-token",
+                "expiresIn": "3600",
+            })
+        if "accounts:lookup" in url:
+            return _FakeResponse({
+                "users": [{
+                    "localId": "local-user",
+                    "email": "oauth@example.com",
+                    "displayName": "OAuth User",
+                    "providerUserInfo": [{"providerId": "google.com"}],
+                }]
+            })
         return _FakeResponse({
-            "idToken": "firebase-id-token",
-            "refreshToken": "firebase-refresh-token",
-            "expiresIn": "3600",
-            "localId": "local-user",
-            "email": "oauth@example.com",
-            "displayName": "OAuth User",
+            "error": {"message": "unexpected url"},
         })
 
-    monkeypatch.setattr(
-        "pebble_tool.firebase_account.InstalledAppFlow.from_client_config",
-        fake_from_client_config,
-    )
+    monkeypatch.setattr(account, "_authenticate_session_via_broker", fake_broker_auth)
     monkeypatch.setattr("pebble_tool.firebase_account.requests.post", fake_post)
 
     args = Namespace(
-        provider="google",
-        auto_link=True,
         id_token=None,
         refresh_token=None,
         expires_in=3600,
         local_id=None,
         firebase_api_key="firebase-api-key",
         firebase_project_id="coreapp-ce061",
-        client_secrets=None,
-        google_client_id="google-client-id",
-        google_client_secret="google-client-secret",
-        github_client_id=None,
-        github_client_secret=None,
+        oauth_broker_base="http://localhost:3001",
+        oauth_client_key="pebble-cli-public",
         auth_host_name="localhost",
         auth_host_port=60000,
         no_open_browser=True,
@@ -118,73 +107,40 @@ def test_firebase_login_via_google_oauth_flow(tmp_path, monkeypatch):
     assert account.bearer_token == "firebase-id-token"
     assert account.id == "local-user"
     assert account.email == "oauth@example.com"
+    assert account.get_credentials()["identity_provider"] == "google.com"
 
 
-def test_firebase_auto_link_on_conflict(tmp_path, monkeypatch):
+def test_firebase_custom_token_sign_in_error_surfaces(tmp_path, monkeypatch):
     account = FirebaseAccount(str(tmp_path))
-    sign_in_calls = []
 
-    def fake_authenticate_provider(provider, args):
-        if provider == "google":
-            return "providerId=google.com&id_token=google-id-token"
-        if provider == "github":
-            return "providerId=github.com&access_token=github-access-token"
-        raise AssertionError("unexpected provider")
+    def fake_broker_auth(args):
+        return "firebase-custom-token"
 
-    def fake_firebase_sign_in(api_key, post_body, existing_id_token=None):
-        sign_in_calls.append((post_body, existing_id_token))
-        if "providerId=google.com" in post_body and existing_id_token is None:
-            from pebble_tool.firebase_account import _FirebaseNeedsLinkError
-            raise _FirebaseNeedsLinkError("ACCOUNT_EXISTS_WITH_DIFFERENT_CREDENTIAL", email="x@example.com")
-        if "providerId=github.com" in post_body and existing_id_token is None:
-            return {
-                "idToken": "existing-account-id-token",
-                "refreshToken": "existing-refresh",
-                "expiresIn": "3600",
-                "localId": "existing-user",
-            }
-        if "providerId=google.com" in post_body and existing_id_token == "existing-account-id-token":
-            return {
-                "idToken": "linked-id-token",
-                "refreshToken": "linked-refresh",
-                "expiresIn": "3600",
-                "localId": "existing-user",
-            }
-        raise AssertionError("unexpected sign-in payload")
+    def fake_post(url, data=None, json=None, timeout=None):
+        return _FakeResponse({"error": {"message": "INVALID_CUSTOM_TOKEN"}}, status_code=400)
 
-    monkeypatch.setattr(account, "_authenticate_provider", fake_authenticate_provider)
-    monkeypatch.setattr(account, "_firebase_sign_in_with_idp", fake_firebase_sign_in)
+    monkeypatch.setattr(account, "_authenticate_session_via_broker", fake_broker_auth)
+    monkeypatch.setattr("pebble_tool.firebase_account.requests.post", fake_post)
 
     args = Namespace(
-        provider="google",
-        auto_link=True,
         id_token=None,
         refresh_token=None,
         expires_in=3600,
         local_id=None,
         firebase_api_key="firebase-api-key",
         firebase_project_id="coreapp-ce061",
-        client_secrets=None,
-        google_client_id="google-client-id",
-        google_client_secret="google-client-secret",
-        github_client_id="github-client-id",
-        github_client_secret="github-client-secret",
+        oauth_broker_base="http://localhost:3001",
+        oauth_client_key="pebble-cli-public",
         auth_host_name="localhost",
         auth_host_port=60000,
         no_open_browser=True,
         verify_login=False,
     )
-    account.login(args)
-
-    assert account.bearer_token == "linked-id-token"
-    assert account.id == "existing-user"
-    assert len(sign_in_calls) == 3
-
-
-def test_prompt_provider_reads_selection(tmp_path, monkeypatch):
-    account = FirebaseAccount(str(tmp_path))
-    monkeypatch.setattr("builtins.input", lambda _: "2")
-    assert account._prompt_provider() == "github"
+    try:
+        account.login(args)
+        assert False, "expected ToolError"
+    except Exception as exc:
+        assert "INVALID_CUSTOM_TOKEN" in str(exc)
 
 
 def test_firebase_logout_clears_storage(tmp_path, monkeypatch):

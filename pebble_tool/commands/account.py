@@ -26,6 +26,7 @@ class LogInCommand(BaseCommand):
                 me_url = "{}/api/v1/developer/me".format(api_base)
                 link_status = "unknown"
                 link_error = None
+                developer_id = None
                 try:
                     response = requests.get(
                         me_url,
@@ -43,6 +44,13 @@ class LogInCommand(BaseCommand):
                         link_error = payload.get("error") or response.text[:200]
                     else:
                         developer = payload.get("developer") or {}
+                        if isinstance(developer, dict):
+                            developer_id = developer.get("id") or developer.get("_id")
+                        if not (account.email or creds.get("email")):
+                            dev_email = developer.get("email")
+                            if dev_email:
+                                creds["email"] = dev_email
+                                account._save_credentials(creds)
                         if isinstance(developer, dict) and (developer.get("id") or developer.get("_id") or developer.get("firebase_uid")):
                             link_status = "linked"
                         else:
@@ -55,6 +63,7 @@ class LogInCommand(BaseCommand):
                 print("Email: {}".format(account.email or creds.get("email") or "unknown"))
                 print("Identity provider: {}".format(creds.get("identity_provider", "unknown")))
                 print("User ID: {}".format(account.id or creds.get("firebase_user_id") or "unknown"))
+                print("Developer ID: {}".format(developer_id or "unknown"))
                 print("Appstore API base: {}".format(api_base))
                 print("Developer link: {}".format(link_status))
                 if link_error:
@@ -73,23 +82,16 @@ class LogInCommand(BaseCommand):
         parser = super(LogInCommand, cls).add_parser(parser)
         parser.add_argument("--status", action="store_true", default=False,
                             help="Show Firebase login status and exit.")
-        parser.add_argument("--provider", choices=["google", "github"], default=None,
-                            help="Initial provider to use for Firebase login. If omitted, you'll be prompted.")
-        parser.add_argument("--auto-link", action="store_true", default=True,
-                            help="Automatically handle account-exists conflicts by signing in with existing provider and linking.")
-        parser.add_argument("--no-auto-link", action="store_false", dest="auto_link",
-                            help="Disable automatic provider-link flow.")
         parser.add_argument("--id-token", type=str, help="Firebase id_token to use directly (skip browser auth).")
         parser.add_argument("--refresh-token", type=str, help="Optional Firebase refresh token for --id-token mode.")
         parser.add_argument("--expires-in", type=int, default=3600, help="Token lifetime in seconds for --id-token mode.")
         parser.add_argument("--local-id", type=str, help="Optional Firebase localId for --id-token mode.")
         parser.add_argument("--firebase-api-key", type=str, help="Firebase Web API key for Identity Toolkit exchange.")
         parser.add_argument("--firebase-project-id", type=str, help="Firebase project id (stored for metadata/debugging).")
-        parser.add_argument("--client-secrets", type=str, help="Path to Google OAuth client secrets JSON.")
-        parser.add_argument("--google-client-id", type=str, help="Google OAuth client id (if not using --client-secrets).")
-        parser.add_argument("--google-client-secret", type=str, help="Google OAuth client secret (if not using --client-secrets).")
-        parser.add_argument("--github-client-id", type=str, help="GitHub OAuth app client id.")
-        parser.add_argument("--github-client-secret", type=str, help="GitHub OAuth app client secret.")
+        parser.add_argument("--oauth-broker-base", type=str,
+                            help="OAuth broker API base URL (default: PEBBLE_CLI_OAUTH_BROKER_BASE or appstore API base).")
+        parser.add_argument("--oauth-client-key", type=str,
+                            help="Public client key for OAuth broker (default: PEBBLE_CLI_OAUTH_CLIENT_KEY).")
         parser.add_argument("--auth-host-name", type=str, default="localhost")
         parser.add_argument("--auth-host-port", type=int, default=60000)
         parser.add_argument("--no-open-browser", action="store_true", default=False,

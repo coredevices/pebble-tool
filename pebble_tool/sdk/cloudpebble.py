@@ -13,9 +13,8 @@ from libpebble2.communication.transports.websocket.protocol import (WebSocketPro
 from pebble_tool.account import get_default_account
 from pebble_tool.exceptions import ToolError
 
-# Temporary local proxy defaults for v1/v2 development.
-CP_TRANSPORT_HOST = os.environ.get('CP_TRANSPORT_HOST', 'ws://localhost:3210/tool')
-CP_TRANSPORT_HOST_V2 = os.environ.get('CP_TRANSPORT_HOST_V2', 'ws://localhost:3210/tool-v2')
+CP_TRANSPORT_HOST = os.environ.get('CP_TRANSPORT_HOST', 'wss://cloudpebble-proxy.repebble.com/tool')
+CP_TRANSPORT_HOST_V2 = os.environ.get('CP_TRANSPORT_HOST_V2', 'wss://cloudpebble-proxy.repebble.com/tool-v2')
 
 logger = logging.getLogger("pebble_tool.sdk.cloudpebble")
 
@@ -56,7 +55,7 @@ class CloudPebbleTransport(WebsocketTransport):
         if token_length > 65535:
             raise ToolError("Firebase token is too large for CloudPebble proxy v2 auth frame.")
         frame = bytearray(3 + token_length)
-        frame[0] = 0x0A
+        frame[0] = 0x19
         frame[1] = token_length // 256
         frame[2] = token_length % 256
         frame[3:] = token_bytes
