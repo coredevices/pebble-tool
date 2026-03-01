@@ -129,7 +129,7 @@ class FirmwareManager(PebbleCommand):
         try:
             progress_bar.variables['task'] = "{:<24}".format(fw_info['name'])
             firmware_bytes = pbz.read(fw_name)
-            pb = PutBytes(self.pebble, PutBytesType.Firmware, firmware_bytes, bank=0)
+            pb = PutBytes(self.pebble, PutBytesType.Firmware, firmware_bytes, bank=args.slot)
             pb.register_handler("progress", handle_progress)
             pb.send()
             progress_bar.finish()
@@ -139,7 +139,7 @@ class FirmwareManager(PebbleCommand):
                 res_name = prefix + res_info['name']
                 progress_bar.variables['task'] = "{:<24}".format(res_info['name'])
                 resource_bytes = pbz.read(res_name)
-                pb = PutBytes(self.pebble, PutBytesType.SystemResources, resource_bytes, bank=0)
+                pb = PutBytes(self.pebble, PutBytesType.SystemResources, resource_bytes, bank=args.slot)
                 pb.register_handler("progress", handle_progress)
                 pb.send()
                 progress_bar.finish()
