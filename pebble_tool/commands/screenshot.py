@@ -45,7 +45,7 @@ let options: CGWindowListOption = [.excludeDesktopElements, .optionOnScreenOnly]
 guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { exit(1) }
 
 let primaryScreenHeight = NSScreen.screens[0].frame.height
-let titleBarHeight: CGFloat = 22
+let titleBarHeight: CGFloat = 28
 
 for window in windowList {
     let ownerName = window[kCGWindowOwnerName as String] as? String ?? ""
@@ -284,6 +284,12 @@ class ScreenshotCommand(PebbleCommand):
                 geom['W'] = int(line.split()[-1])
             elif 'Height:' in line:
                 geom['H'] = int(line.split()[-1])
+
+        if geom.get('W') == 148 and geom.get('H') == 172:
+            geom['X'] += 2
+            geom['Y'] += 2
+            geom['W'] -= 4
+            geom['H'] -= 4
 
         subprocess.run(['xdotool', 'windowactivate', '--sync', win_id])
         try:
