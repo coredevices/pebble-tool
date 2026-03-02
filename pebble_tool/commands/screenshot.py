@@ -11,6 +11,7 @@ import png
 import os.path
 import re
 import socket
+import threading
 from progressbar import ProgressBar, Bar, ReverseBar, FileTransferSpeed, Timer, Percentage
 import signal
 import subprocess
@@ -31,9 +32,63 @@ from .install import ToolAppInstaller
 from pebble_tool.commands.sdk.project.build import BuildCommand
 from pebble_tool.exceptions import ToolError
 from pebble_tool.sdk.project import PebbleProject
-from pebble_tool.sdk import sdk_manager
+from pebble_tool.sdk import sdk_manager, get_sdk_persist_dir
 import pebble_tool.sdk.emulator as emulator
 from pebble_tool.sdk.emulator import ManagedEmulatorTransport
+
+
+_MACOS_WINDOW_FINDER_SWIFT = r"""
+import Cocoa
+import CoreGraphics
+
+let options: CGWindowListOption = [.excludeDesktopElements, .optionOnScreenOnly]
+guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { exit(1) }
+
+let primaryScreenHeight = NSScreen.screens[0].frame.height
+let titleBarHeight: CGFloat = 22
+
+for window in windowList {
+    let ownerName = window[kCGWindowOwnerName as String] as? String ?? ""
+    guard ownerName.lowercased().contains("qemu") else { continue }
+    let layer = window[kCGWindowLayer as String] as? Int ?? -1
+    guard layer == 0 else { continue }
+
+    let bounds = window[kCGWindowBounds as String] as? [String: Any] ?? [:]
+    let winX = bounds["X"] as? CGFloat ?? 0
+    let winY = bounds["Y"] as? CGFloat ?? 0
+    let winW = bounds["Width"] as? CGFloat ?? 0
+    let winH = bounds["Height"] as? CGFloat ?? 0
+    guard winW > 0 && winH > 0 else { continue }
+
+    let centerCocoaY = primaryScreenHeight - (winY + winH / 2)
+    let centerCocoa = NSPoint(x: winX + winW / 2, y: centerCocoaY)
+
+    var screenIdx = 0
+    var scale: CGFloat = 1.0
+    var screenOriginX: CGFloat = 0
+    var screenOriginY: CGFloat = 0
+
+    for (i, screen) in NSScreen.screens.enumerated() {
+        if screen.frame.contains(centerCocoa) {
+            screenIdx = i
+            scale = screen.backingScaleFactor
+            screenOriginX = screen.frame.origin.x
+            screenOriginY = primaryScreenHeight - screen.frame.origin.y - screen.frame.height
+            break
+        }
+    }
+
+    let cropX = Int((winX - screenOriginX) * scale)
+    let cropY = Int((winY + titleBarHeight - screenOriginY) * scale)
+    let cropW = Int(winW * scale)
+    let cropH = Int((winH - titleBarHeight) * scale)
+
+    print("\(cropX),\(cropY),\(cropW),\(cropH),\(screenIdx)")
+    exit(0)
+}
+fputs("No QEMU window found\n", stderr)
+exit(1)
+"""
 
 
 def _positive_int(value):
@@ -159,14 +214,104 @@ class ScreenshotCommand(PebbleCommand):
             time.sleep(0.01)
         raise ToolError("Timed out waiting for screendump at {}".format(ppm_path))
 
+    @staticmethod
+    def _check_gif_dependencies():
+        missing = []
+        if not shutil.which('ffmpeg'):
+            missing.append('ffmpeg')
+        if sys.platform == 'darwin':
+            if not shutil.which('swift'):
+                missing.append('swift')
+        if sys.platform.startswith('linux'):
+            if not shutil.which('xdotool'):
+                missing.append('xdotool')
+            if not shutil.which('xwininfo'):
+                missing.append('xwininfo')
+        if missing:
+            if sys.platform == 'darwin':
+                brew_pkgs = [m for m in missing if m != 'swift']
+                hints = []
+                if brew_pkgs:
+                    hints.append("brew install {}".format(' '.join(brew_pkgs)))
+                if 'swift' in missing:
+                    hints.append("install Xcode Command Line Tools (xcode-select --install)")
+                hint = "Install with: {}".format('; '.join(hints))
+            else:
+                pkg_names = ['x11-utils' if m == 'xwininfo' else m for m in missing]
+                hint = "Install with: sudo apt install {}".format(' '.join(pkg_names))
+            raise ToolError("Missing required tools for GIF capture: {}. {}".format(
+                ', '.join(missing), hint))
+
+    @classmethod
+    def _find_qemu_window(cls):
+        if sys.platform == 'darwin':
+            return cls._find_qemu_window_macos()
+        elif sys.platform.startswith('linux'):
+            return cls._find_qemu_window_linux()
+        else:
+            raise ToolError("GIF capture is only supported on macOS and Linux.")
+
+    @classmethod
+    def _find_qemu_window_macos(cls):
+        result = subprocess.run(['swift', '-'], input=_MACOS_WINDOW_FINDER_SWIFT,
+                                capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            raise ToolError("Could not find QEMU emulator window. Is the emulator running?")
+        try:
+            parts = result.stdout.strip().split(',')
+            crop_x, crop_y, crop_w, crop_h, screen_idx = (int(p) for p in parts)
+        except (ValueError, TypeError):
+            raise ToolError("Could not parse QEMU window geometry. Is the emulator running?")
+        return crop_x, crop_y, crop_w, crop_h, screen_idx
+
+    @classmethod
+    def _find_qemu_window_linux(cls):
+        result = subprocess.run(['xdotool', 'search', '--name', 'QEMU'],
+                                capture_output=True, text=True)
+        if result.returncode != 0 or not result.stdout.strip():
+            raise ToolError("Could not find QEMU emulator window. Is the emulator running?")
+        win_id = result.stdout.strip().split('\n')[0]
+
+        result = subprocess.run(['xwininfo', '-id', win_id],
+                                capture_output=True, text=True)
+        geom = {}
+        for line in result.stdout.split('\n'):
+            if 'Absolute upper-left X' in line:
+                geom['X'] = int(line.split()[-1])
+            elif 'Absolute upper-left Y' in line:
+                geom['Y'] = int(line.split()[-1])
+            elif 'Width:' in line:
+                geom['W'] = int(line.split()[-1])
+            elif 'Height:' in line:
+                geom['H'] = int(line.split()[-1])
+
+        subprocess.run(['xdotool', 'windowactivate', '--sync', win_id])
+        try:
+            return geom['X'], geom['Y'], geom['W'], geom['H'], 0
+        except KeyError:
+            raise ToolError("Failed to parse QEMU window geometry from xwininfo.")
+
+    @classmethod
+    def _get_avfoundation_screen_device(cls, screen_idx):
+        result = subprocess.run(['ffmpeg', '-f', 'avfoundation', '-list_devices', 'true', '-i', ''],
+                                capture_output=True, text=True)
+        for line in result.stderr.split('\n'):
+            match = re.search(r'\[(\d+)\] Capture screen (\d+)', line)
+            if match and int(match.group(2)) == screen_idx:
+                return int(match.group(1))
+        raise ToolError("Could not find avfoundation device for screen {}".format(screen_idx))
+
+    @classmethod
+    def _run_ffmpeg(cls, args, step_name="ffmpeg"):
+        result = subprocess.run(args, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise ToolError("{} failed: {}".format(step_name, result.stderr.strip()))
+
     def _capture_rollover_gif(self, args, filename, start_dt):
         duration_seconds = 7
         target_fps = args.gif_fps
-        frame_interval = 1.0 / float(target_fps)
 
-        frames = []
-        frame_timestamps = []
-        prime_dt = start_dt - datetime.timedelta(seconds=1)
+        prime_dt = start_dt - datetime.timedelta(seconds=2)
         # Prime time-setting a few times so the watch applies it before capture starts.
         for _ in range(3):
             self._set_time(pebble=self.pebble, target_datetime=prime_dt, use_localtime=False)
@@ -174,62 +319,93 @@ class ScreenshotCommand(PebbleCommand):
         # Let the watch tick into the requested start time naturally.
         time.sleep(1.05)
 
+        crop_x, crop_y, crop_w, crop_h, screen_idx = self._find_qemu_window()
+        crop_filter = "crop={}:{}:{}:{}".format(crop_w, crop_h, crop_x, crop_y)
+
         transport = getattr(self.pebble, "transport", None)
         monitor_port = getattr(transport, "qemu_monitor_port", None)
-        use_monitor_capture = bool(monitor_port)
+        stop_keepalive = threading.Event()
 
-        temp_dir = tempfile.mkdtemp(prefix="pebble-screendump-")
-        capture_start = time.perf_counter()
-        next_capture_time = capture_start
+        def backlight_keepalive():
+            while not stop_keepalive.wait(1.0):
+                if monitor_port:
+                    self._qemu_monitor_command(monitor_port, "sendkey left")
+
+        if monitor_port:
+            self._qemu_monitor_command(monitor_port, "sendkey left")
+
+        keepalive_thread = threading.Thread(target=backlight_keepalive, daemon=True)
+        keepalive_thread.start()
+
+        temp_dir = tempfile.mkdtemp(prefix="pebble-gif-")
         try:
-            while True:
-                now = time.perf_counter()
-                if now < next_capture_time:
-                    time.sleep(next_capture_time - now)
-                if time.perf_counter() - capture_start >= duration_seconds:
-                    break
-                if use_monitor_capture:
-                    try:
-                        frames.append(self._grab_qemu_monitor_image_fast(monitor_port, temp_dir, len(frames)))
-                    except Exception as e:
-                        print("Monitor capture failed ({}); falling back to watch screenshot.".format(e))
-                        use_monitor_capture = False
-                        frames.append(self._grab_pillow_image_fast())
-                else:
-                    frames.append(self._grab_pillow_image_fast())
-                frame_timestamps.append(time.perf_counter())
-                next_capture_time += frame_interval
+            raw_video = os.path.join(temp_dir, "raw.mp4")
+            decimated = os.path.join(temp_dir, "decimated.mp4")
+            palette = os.path.join(temp_dir, "palette.png")
+
+            if sys.platform == 'darwin':
+                device_idx = self._get_avfoundation_screen_device(screen_idx)
+                capture_cmd = [
+                    'ffmpeg', '-f', 'avfoundation',
+                    '-framerate', str(target_fps),
+                    '-capture_cursor', '0',
+                    '-pixel_format', '0rgb',
+                    '-i', '{}:none'.format(device_idx),
+                    '-vf', crop_filter,
+                    '-c:v', 'libx264', '-crf', '0',
+                    '-t', str(duration_seconds),
+                    raw_video, '-v', 'warning',
+                ]
+            else:
+                display = os.environ.get('DISPLAY', ':0')
+                capture_cmd = [
+                    'ffmpeg', '-f', 'x11grab',
+                    '-draw_mouse', '0',
+                    '-framerate', str(target_fps),
+                    '-i', display,
+                    '-vf', crop_filter,
+                    '-c:v', 'libx264rgb', '-crf', '0',
+                    '-t', str(duration_seconds),
+                    raw_video, '-v', 'error',
+                ]
+
+            print("Recording emulator window for {} seconds...".format(duration_seconds))
+            try:
+                self._run_ffmpeg(capture_cmd, "Screen capture")
+            finally:
+                stop_keepalive.set()
+                keepalive_thread.join(timeout=3.0)
+
+            print("Processing recording...")
+            self._run_ffmpeg([
+                'ffmpeg', '-i', raw_video,
+                '-vf', 'mpdecimate,fps={}'.format(target_fps),
+                '-c:v', 'libx264rgb', '-crf', '0',
+                decimated, '-v', 'error',
+            ], "Frame decimation")
+
+            self._run_ffmpeg([
+                'ffmpeg', '-i', decimated,
+                '-vf', 'palettegen=max_colors=64:reserve_transparent=0',
+                palette, '-v', 'error',
+            ], "Palette generation")
+
+            output_dir = os.path.dirname(filename)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+
+            self._run_ffmpeg([
+                'ffmpeg', '-i', decimated, '-i', palette,
+                '-filter_complex', '[0:v][1:v]paletteuse=dither=none',
+                '-y', filename, '-v', 'error',
+            ], "GIF encoding")
+
+            print("Saved rollover GIF to {}".format(filename))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-        output_dir = os.path.dirname(filename)
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-
-        if not frames:
-            raise ToolError("No frames captured for GIF.")
-
-        if len(frame_timestamps) > 1:
-            durations = [
-                max(20, int((frame_timestamps[i + 1] - frame_timestamps[i]) * 1000))
-                for i in range(len(frame_timestamps) - 1)
-            ]
-            durations.append(durations[-1])
-        else:
-            durations = [1000]
-
-        frames[0].save(
-            filename,
-            save_all=True,
-            append_images=frames[1:],
-            duration=durations,
-            loop=0,
-            disposal=2,
-        )
-        print("Saved rollover GIF to {}".format(filename))
-        # Intentionally do not auto-open GIFs in --gif-all-platforms mode.
-
     def _capture_gif_all_platforms(self, args):
+        self._check_gif_dependencies()
         project, pbw_path = self._ensure_project_pbw(args)
         platforms, app_version = self._extract_pbw_metadata(pbw_path, project)
         captured_files = []
@@ -244,6 +420,11 @@ class ScreenshotCommand(PebbleCommand):
             pebble = None
             previous_pebble = getattr(self, "pebble", None)
             try:
+                # Wipe emulator persist state so app install starts clean
+                target_sdk = args.sdk or sdk_manager.get_current_sdk()
+                persist_dir = get_sdk_persist_dir(platform_name, target_sdk)
+                if os.path.exists(persist_dir):
+                    shutil.rmtree(persist_dir)
                 pebble = self._connect_emulator(platform_name, args.sdk, vnc_enabled=False)
                 self.pebble = pebble
                 ToolAppInstaller(pebble, pbw_path, quiet=True).install()
@@ -552,8 +733,8 @@ class ScreenshotCommand(PebbleCommand):
         parser.add_argument('--no-open', action="store_true", help="Disable automatic opening of image.")
         parser.add_argument('--gif-all-platforms', action='store_true',
                             help="Build and capture a rollover GIF on emulator for each platform supported by this app.")
-        parser.add_argument('--gif-fps', type=_positive_int, default=10,
-                            help="FPS cap for --gif-all-platforms capture (default: 10).")
+        parser.add_argument('--gif-fps', type=_positive_int, default=30,
+                            help="FPS cap for --gif-all-platforms capture (default: 30).")
         parser.add_argument('--all-platforms', action='store_true',
                             help="Build and capture screenshots on emulator for each platform supported by this app.")
         return parser
