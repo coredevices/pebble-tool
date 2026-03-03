@@ -223,6 +223,11 @@ class ScreenshotCommand(PebbleCommand):
             if not shutil.which('swift'):
                 missing.append('swift')
         if sys.platform.startswith('linux'):
+            session_type = os.environ.get('XDG_SESSION_TYPE', '').lower()
+            if session_type == 'wayland' or os.environ.get('WAYLAND_DISPLAY'):
+                raise ToolError(
+                    "GIF capture uses x11grab and is not supported under Wayland. "
+                    "Run the emulator under an X11 session or use Xwayland.")
             if not shutil.which('xdotool'):
                 missing.append('xdotool')
             if not shutil.which('xwininfo'):
@@ -270,7 +275,11 @@ class ScreenshotCommand(PebbleCommand):
                                 capture_output=True, text=True)
         if result.returncode != 0 or not result.stdout.strip():
             raise ToolError("Could not find QEMU emulator window. Is the emulator running?")
-        win_id = result.stdout.strip().split('\n')[0]
+        win_ids = result.stdout.strip().split('\n')
+        if len(win_ids) > 1:
+            print("Warning: xdotool found {} QEMU windows; using last ID. "
+                  "Crop region may be incorrect if the wrong window is selected.".format(len(win_ids)))
+        win_id = win_ids[-1]
 
         result = subprocess.run(['xwininfo', '-id', win_id],
                                 capture_output=True, text=True)
@@ -290,6 +299,16 @@ class ScreenshotCommand(PebbleCommand):
             geom['Y'] += 2
             geom['W'] -= 4
             geom['H'] -= 4
+
+        if shutil.which('xrandr'):
+            try:
+                xr = subprocess.run(['xrandr', '--query'], capture_output=True, text=True, timeout=5)
+                monitors = [l for l in xr.stdout.split('\n') if ' connected ' in l]
+                if len(monitors) > 1:
+                    print("Warning: {} monitors detected. GIF capture assumes a single display "
+                          "and may produce incorrect results on multi-monitor setups.".format(len(monitors)))
+            except Exception:
+                pass
 
         subprocess.run(['xdotool', 'windowactivate', '--sync', win_id])
         try:
