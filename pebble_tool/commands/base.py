@@ -237,6 +237,19 @@ class PebbleTransportQemu(PebbleTransportConfiguration):
             sdk_version = getattr(args, 'sdk', None)
             cls._using_pypkjs = True
             return ExternalQemuTransport(ip, port, platform, sdk_version)
+
+        # Check if a pypkjs is already mediating for this QEMU port.
+        # If so, connect through it via WebSocket instead of directly to QEMU
+        # (QEMU only supports one TCP client per serial port).
+        existing = ExternalQemuTransport.get_existing_pypkjs_info(ip, port)
+        if existing is not None:
+            logging.getLogger(__name__).info(
+                "Found existing pypkjs (pid %d) on port %d for QEMU %s:%d, "
+                "connecting through it instead of directly to QEMU.",
+                existing['pypkjs_pid'], existing['pypkjs_port'], ip, port)
+            cls._using_pypkjs = True
+            return WebsocketTransport('ws://localhost:{}/'.format(existing['pypkjs_port']))
+
         cls._using_pypkjs = False
         return cls.transport_class(ip, port)
 

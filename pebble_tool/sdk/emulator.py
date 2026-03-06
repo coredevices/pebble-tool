@@ -530,11 +530,23 @@ class ExternalQemuTransport(WebsocketTransport):
         self.platform = platform
         self.version = version
         self.pypkjs_pid = None
-        self.pypkjs_port = self._choose_port()
+        self._spawned_pypkjs = False
+
+        # Check if a pypkjs is already running for this QEMU port
+        existing = self.get_existing_pypkjs_info(qemu_host, qemu_port)
+        if existing is not None:
+            self.pypkjs_port = existing['pypkjs_port']
+            self.pypkjs_pid = existing['pypkjs_pid']
+            logger.info("Reusing existing pypkjs (pid %d) on port %d for QEMU %s:%d",
+                        self.pypkjs_pid, self.pypkjs_port, qemu_host, qemu_port)
+        else:
+            self.pypkjs_port = self._choose_port()
+
         super(ExternalQemuTransport, self).__init__('ws://localhost:{}/'.format(self.pypkjs_port))
 
     def connect(self):
-        self._spawn_pypkjs()
+        if self.pypkjs_pid is None or not self._is_pid_running(self.pypkjs_pid):
+            self._spawn_pypkjs()
         for i in range(10):
             time.sleep(0.5)
             try:
@@ -546,8 +558,78 @@ class ExternalQemuTransport(WebsocketTransport):
                 return
         super(ExternalQemuTransport, self).connect()
 
+    @staticmethod
+    def _get_state_file_path(qemu_port):
+        """Get the path to the state file for a given QEMU port."""
+        return os.path.join(tempfile.gettempdir(), 'pb-qemu-pypkjs-{}.json'.format(qemu_port))
+
+    @classmethod
+    def get_existing_pypkjs_info(cls, qemu_host, qemu_port):
+        """Check if a pypkjs is already running for the given QEMU port.
+
+        Returns a dict with 'pypkjs_pid' and 'pypkjs_port' if a live pypkjs
+        is found, or None if not.
+        """
+        state_file = cls._get_state_file_path(qemu_port)
+        try:
+            with open(state_file) as f:
+                info = json.load(f)
+        except (OSError, IOError, ValueError):
+            return None
+
+        pid = info.get('pypkjs_pid')
+        port = info.get('pypkjs_port')
+        if pid is None or port is None:
+            return None
+
+        if cls._is_pid_running(pid):
+            return info
+        else:
+            # Stale state file -- clean it up
+            logger.debug("Cleaning up stale pypkjs state file for QEMU port %d (pid %d not running)",
+                         qemu_port, pid)
+            try:
+                os.remove(state_file)
+            except OSError:
+                pass
+            return None
+
+    def _write_state_file(self):
+        """Write pypkjs connection info to a state file for other commands to discover."""
+        state_file = self._get_state_file_path(self.qemu_port)
+        info = {
+            'pypkjs_pid': self.pypkjs_pid,
+            'pypkjs_port': self.pypkjs_port,
+            'qemu_host': self.qemu_host,
+            'qemu_port': self.qemu_port,
+        }
+        # Write atomically via temp file + rename to avoid races
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=tempfile.gettempdir(), suffix='.tmp')
+        try:
+            with os.fdopen(tmp_fd, 'w') as f:
+                json.dump(info, f, indent=4)
+            os.replace(tmp_path, state_file)
+            logger.debug("Wrote pypkjs state file: %s", state_file)
+        except Exception:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
+
+    def _remove_state_file(self):
+        """Remove the state file for this QEMU port."""
+        state_file = self._get_state_file_path(self.qemu_port)
+        try:
+            os.remove(state_file)
+            logger.debug("Removed pypkjs state file: %s", state_file)
+        except OSError:
+            pass
+
     def _kill_existing_pypkjs(self):
         """Kill any existing pypkjs processes connected to the target QEMU."""
+        # First clean up any state file
+        self._remove_state_file()
         try:
             # Use lsof to find processes connected to the QEMU port
             result = subprocess.run(
@@ -614,7 +696,9 @@ class ExternalQemuTransport(WebsocketTransport):
                 out = getattr(e, 'stdout', None) or getattr(e, 'output', None)
                 raise MissingEmulatorError("Couldn't launch pypkjs:\n{}".format(_to_text(out).strip()))
         self.pypkjs_pid = process.pid
+        self._spawned_pypkjs = True
         logger.info("pypkjs spawned with pid %d, listening on port %d", self.pypkjs_pid, self.pypkjs_port)
+        self._write_state_file()
 
     def _get_output(self):
         if logger.getEffectiveLevel() <= logging.DEBUG:
@@ -629,3 +713,14 @@ class ExternalQemuTransport(WebsocketTransport):
         port = sock.getsockname()[1]
         sock.close()
         return port
+
+    @staticmethod
+    def _is_pid_running(pid):
+        try:
+            os.kill(pid, 0)
+        except OSError as e:
+            if e.errno == 3:
+                return False
+            else:
+                raise
+        return True

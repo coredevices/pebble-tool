@@ -5,7 +5,7 @@ import argparse
 import datetime
 import time
 
-from libpebble2.communication.transports.websocket import MessageTargetPhone
+from libpebble2.communication.transports.websocket import MessageTargetPhone, WebsocketTransport
 from libpebble2.communication.transports.websocket.protocol import AppConfigCancelled, AppConfigResponse, AppConfigSetup
 from libpebble2.communication.transports.websocket.protocol import WebSocketPhonesimAppConfig
 from libpebble2.communication.transports.websocket.protocol import WebSocketPhonesimConfigResponse, WebSocketRelayQemu
@@ -23,7 +23,7 @@ from pebble_tool.util.browser import BrowserController
 
 def send_data_to_qemu(transport, data):
     try:
-        if isinstance(transport, ManagedEmulatorTransport):
+        if isinstance(transport, WebsocketTransport):
             packet = QemuPacket(data=data)
             packet.serialise()
             transport.send_packet(WebSocketRelayQemu(protocol=packet.protocol, data=data.serialise()),
