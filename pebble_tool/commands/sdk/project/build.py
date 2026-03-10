@@ -142,7 +142,6 @@ class BuildCommand(SDKProjectCommand):
                 cmd = [
                     'mcrun',
                     '-m', './src/embeddedjs/manifest.json',
-                    '-f', 'x',
                     '-p', f'pebble/{platform}',
                     '-t', 'build',
                     '-o', mcrun_output_dir,
