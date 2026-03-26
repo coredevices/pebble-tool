@@ -28,6 +28,16 @@ from libpebble2.services.screenshot import Screenshot
 from libpebble2.protocol.system import TimeMessage, SetLocaltime, SetUTC
 
 from .base import PebbleCommand, BaseCommand
+
+# Expected screenshot dimensions per platform (width, height in logical pixels).
+PLATFORM_SCREENSHOT_DIMS = {
+    'aplite': (144, 168),
+    'basalt': (144, 168),
+    'chalk': (180, 180),
+    'diorite': (144, 168),
+    'emery': (200, 228),
+    'gabbro': (180, 180),
+}
 from .install import ToolAppInstaller
 from pebble_tool.commands.sdk.project.build import BuildCommand
 from pebble_tool.exceptions import ToolError
@@ -332,6 +342,43 @@ class ScreenshotCommand(PebbleCommand):
         if result.returncode != 0:
             raise ToolError("{} failed: {}".format(step_name, result.stderr.strip()))
 
+    @classmethod
+    def _resize_gif_if_needed(cls, gif_path, platform):
+        """Resize a captured GIF to match expected platform dimensions (e.g. Retina 2x fix)."""
+        expected = PLATFORM_SCREENSHOT_DIMS.get(platform)
+        if not expected:
+            return
+        try:
+            probe = subprocess.run(
+                ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                 '-show_entries', 'stream=width,height',
+                 '-of', 'csv=p=0', gif_path],
+                capture_output=True, text=True,
+            )
+            if probe.returncode != 0:
+                return
+            parts = probe.stdout.strip().split(',')
+            if len(parts) < 2:
+                return
+            actual_w, actual_h = int(parts[0]), int(parts[1])
+        except (ValueError, OSError):
+            return
+        if (actual_w, actual_h) == expected:
+            return
+        print("Resizing GIF from {}x{} to {}x{} for {}...".format(
+            actual_w, actual_h, expected[0], expected[1], platform))
+        tmp_path = gif_path + ".resized.gif"
+        try:
+            cls._run_ffmpeg([
+                'ffmpeg', '-i', gif_path,
+                '-vf', 'scale={}:{}:flags=lanczos'.format(expected[0], expected[1]),
+                '-y', tmp_path, '-v', 'error',
+            ], "GIF resize")
+            os.replace(tmp_path, gif_path)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
     def _capture_rollover_gif(self, args, filename, start_dt):
         duration_seconds = 7
         target_fps = args.gif_fps
@@ -455,6 +502,7 @@ class ScreenshotCommand(PebbleCommand):
                 ToolAppInstaller(pebble, pbw_path, quiet=True).install()
                 filename = self._platform_filename(screenshots_dir, platform_name, app_version, extension="gif")
                 self._capture_rollover_gif(args, filename, start_dt)
+                self._resize_gif_if_needed(filename, platform_name)
                 captured_files.append(filename)
             except Exception as e:
                 print("Failed GIF capture for {}: {}".format(platform_name, e))

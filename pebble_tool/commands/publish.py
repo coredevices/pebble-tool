@@ -489,6 +489,13 @@ class PublishCommand(BaseCommand):
         return None
 
     @classmethod
+    def _is_screenshot_error(cls, response, payload):
+        if response.status_code != 400:
+            return False
+        error_text = (payload.get("error") or response.text or "").lower()
+        return "screenshot" in error_text
+
+    @classmethod
     def _upload_release(
         cls,
         api_base,
@@ -558,6 +565,18 @@ class PublishCommand(BaseCommand):
             )
 
         if response.status_code >= 400:
+            if cls._is_screenshot_error(response, payload) and (gif_paths or screenshot_paths):
+                print("{}Screenshot validation failed — retrying upload without screenshots...{}".format(
+                    Fore.YELLOW, Style.RESET_ALL))
+                print("  Server said: {}".format(payload.get("error", response.text[:200])))
+                return cls._upload_release(
+                    api_base=api_base, app_id=app_id,
+                    firebase_id_token=firebase_id_token,
+                    pbw_path=pbw_path, version=version,
+                    release_notes=release_notes,
+                    is_published=is_published,
+                    gif_paths=[], screenshot_paths=[],
+                )
             raise ToolError(
                 "Release upload failed ({}): {}".format(
                     response.status_code,
@@ -863,6 +882,20 @@ class PublishCommand(BaseCommand):
             payload = {}
 
         if response.status_code >= 400:
+            if cls._is_screenshot_error(response, payload) and (gif_paths or screenshot_paths):
+                print("{}Screenshot validation failed — retrying upload without screenshots...{}".format(
+                    Fore.YELLOW, Style.RESET_ALL))
+                print("  Server said: {}".format(payload.get("error", response.text[:200])))
+                return cls._create_app(
+                    api_base=api_base,
+                    firebase_id_token=firebase_id_token,
+                    pbw_path=pbw_path,
+                    pbw_metadata=pbw_metadata,
+                    create_details=create_details,
+                    release_notes=release_notes,
+                    is_published=is_published,
+                    gif_paths=[], screenshot_paths=[],
+                )
             raise ToolError(
                 "App create failed ({}): {}".format(
                     response.status_code,
