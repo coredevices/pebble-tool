@@ -35,6 +35,7 @@ PLATFORM_SCREENSHOT_DIMS = {
     'basalt': (144, 168),
     'chalk': (180, 180),
     'diorite': (144, 168),
+    'flint': (144, 168),
     'emery': (200, 228),
     'gabbro': (260, 260),
 }
