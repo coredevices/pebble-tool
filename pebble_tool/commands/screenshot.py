@@ -36,7 +36,7 @@ PLATFORM_SCREENSHOT_DIMS = {
     'chalk': (180, 180),
     'diorite': (144, 168),
     'emery': (200, 228),
-    'gabbro': (180, 180),
+    'gabbro': (260, 260),
 }
 from .install import ToolAppInstaller
 from pebble_tool.commands.sdk.project.build import BuildCommand
