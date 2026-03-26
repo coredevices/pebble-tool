@@ -22,7 +22,7 @@ class InstallCommand(PebbleCommand):
     def __call__(self, args):
         super(InstallCommand, self).__call__(args)
         try:
-            ToolAppInstaller(self.pebble, args.pbw).install()
+            ToolAppInstaller(self.pebble, args.pbw).install(force_install=args.force)
         except IOError as e:
             if args.pbw is None:
                 raise ToolError("You must either run this command from a project directory or specify the pbw "
@@ -65,6 +65,8 @@ class InstallCommand(PebbleCommand):
     def add_parser(cls, parser):
         parser = super(InstallCommand, cls).add_parser(parser)
         parser.add_argument('pbw', help="Path to app to install.", nargs='?', default=None)
+        parser.add_argument('--force', action="store_true",
+                            help="Force install even if the pbw doesn't support the connected platform")
         parser.add_argument('--logs', action="store_true", help="Enable logs")
         parser.add_argument('--qemu_logs', action="store_true", help="Enable QEMU serial logs (emulator only)")
         return parser
@@ -78,18 +80,18 @@ class ToolAppInstaller(object):
         self.progress_bar = ProgressBar(widgets=[Percentage(), Bar(marker='=', left='[', right=']'), ' ',
                                                  FileTransferSpeed(), ' ', Timer(format='%s')])
 
-    def install(self):
+    def install(self, force_install=False):
         if isinstance(self.pebble.transport, WebsocketTransport):
             self._install_via_websocket(self.pebble, self.pbw)
         else:
-            self._install_via_serial(self.pebble, self.pbw)
+            self._install_via_serial(self.pebble, self.pbw, force_install=force_install)
 
-    def _install_via_serial(self, pebble, pbw):
+    def _install_via_serial(self, pebble, pbw, force_install=False):
         installer = AppInstaller(pebble, pbw)
         self.progress_bar.maxval = installer.total_size
         self.progress_bar.start()
         installer.register_handler("progress", self._handle_pp_progress)
-        installer.install()
+        installer.install(force_install=force_install)
         self.progress_bar.finish()
 
     def _handle_pp_progress(self, sent, total_sent, total_size):
