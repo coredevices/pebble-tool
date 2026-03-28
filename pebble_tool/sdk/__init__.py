@@ -28,14 +28,14 @@ sdk_manager = SDKManager()
 def has_rocky_tools(version=None):
     """Check if the SDK has Rocky.js tools available.
 
-    Rocky.js requires js_tooling.wasm which is only present in certain SDK versions.
+    Rocky.js requires js_tooling.js which is only present in certain SDK versions.
     """
     if version is None:
         version = sdk_manager.get_current_sdk()
     if version is None:
         return False
     sdk_dir = os.path.join(get_persist_dir(), "SDKs", version, "sdk-core")
-    js_tooling_path = os.path.join(sdk_dir, "pebble", "common", "tools", "js_tooling.wasm")
+    js_tooling_path = os.path.join(sdk_dir, "pebble", "common", "tools", "js_tooling.js")
     return os.path.exists(js_tooling_path)
 
 

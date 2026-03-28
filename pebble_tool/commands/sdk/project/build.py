@@ -31,7 +31,7 @@ class BuildCommand(SDKProjectCommand):
                 raise ToolError(
                     "This is a Rocky.js project, but the currently active SDK ({}) "
                     "does not have Rocky.js tools installed.\n\n"
-                    "Rocky.js requires an SDK version that includes js_tooling.wasm.\n"
+                    "Rocky.js requires an SDK version that includes js_tooling.js.\n"
                     "Try installing a different SDK version with 'pebble sdk install <version>'.".format(
                         sdk_version() or "unknown"
                     )
