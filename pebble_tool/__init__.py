@@ -15,6 +15,7 @@ from .sdk import sdk_version
 from .util.analytics import wait_for_analytics, analytics_prompt
 from .util.config import config
 from .util.updates import wait_for_update_checks
+from .util.update_notify import check_for_updates, wait_for_update_notify
 from .util.wsl import maybe_apply_wsl_hacks
 from importlib.metadata import version
 
@@ -53,6 +54,7 @@ def run_tool(args=None):
     args = parser.parse_args(args)
     if not hasattr(args, 'func'):
         parser.error("no subcommand specified.")
+    check_for_updates()
     try:
         args.func(args)
     except ToolError as e:
@@ -66,5 +68,6 @@ def wait_for_cleanup():
     now = time.time()
     wait_for_analytics(2)
     wait_for_update_checks(2)
+    wait_for_update_notify(3)
     logging.info("Spent %f seconds waiting for analytics.", time.time() - now)
     config.save()
