@@ -204,9 +204,18 @@ class PebbleTransportPhone(PebbleTransportConfiguration):
         return ("ws://{}:{}/".format(ip, port),)
 
     @classmethod
+    def get_transport(cls, args):
+        phone = getattr(args, cls.name, None) or cls._config_env_var()
+        if phone is True:
+            # --phone with no argument: use CloudPebble
+            return CloudPebbleTransport()
+        return cls.transport_class(*cls._connect_args(args))
+
+    @classmethod
     def add_argument_handler(cls, parser):
-        parser.add_argument('--phone', metavar='phone_ip',
-                            help="When using the developer connection, your phone's IP or hostname. "
+        parser.add_argument('--phone', nargs='?', const=True, metavar='phone_ip',
+                            help="Connect to your phone. If phone_ip is given, connect directly via "
+                                 "WebSocket; otherwise, use the CloudPebble connection. "
                                  "Equivalent to PEBBLE_PHONE.")
 
 
