@@ -251,10 +251,9 @@ class SDKManager(object):
         os.rmdir(os.path.join(toolchain_path, 'toolchain-' + platform_name))
 
     def install_remote_sdk(self, version):
-        versions = [x['version'] for x in self.list_remote_sdks()] + ['latest']
-        if version not in versions:
-            raise SDKInstallError("SDK {} could not be found.".format(version))
         sdk_info = self.request("/v1/files/sdk-core/{}?channel={}".format(version, self.get_channel())).json()
+        if version not in sdk_info:
+            raise SDKInstallError("SDK {} could not be downloaded.".format(version))
         path = os.path.normpath(os.path.join(self.sdk_dir, sdk_info['version']))
         manifest_path = os.path.join(path, 'sdk-core', 'manifest.json')
 
