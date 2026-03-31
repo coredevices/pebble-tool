@@ -252,7 +252,7 @@ class SDKManager(object):
 
     def install_remote_sdk(self, version):
         sdk_info = self.request("/v1/files/sdk-core/{}?channel={}".format(version, self.get_channel())).json()
-        if version not in sdk_info:
+        if 'version' not in sdk_info:
             raise SDKInstallError("SDK {} could not be downloaded.".format(version))
         path = os.path.normpath(os.path.join(self.sdk_dir, sdk_info['version']))
         manifest_path = os.path.join(path, 'sdk-core', 'manifest.json')
