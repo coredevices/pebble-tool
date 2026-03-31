@@ -964,7 +964,7 @@ wheels = [
 
 [[package]]
 name = "pebble-tool"
-version = "5.0.29"
+version = "5.0.30"
 source = { editable = "." }
 dependencies = [
     { name = "cobs" },
