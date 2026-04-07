@@ -80,12 +80,17 @@ class PebbleCommand(BaseCommand):
     def _shared_parser(cls):
         parser = argparse.ArgumentParser(add_help=False)
         handlers = cls.valid_connection_handlers()
-        # Having a group inside a mutually exclusive group breaks --help unless there are is
-        # something for it to be mutually exlusive with.
+
+        # A group can only be mutually exclusive if it contains at least one command,
+        # else argparse raises an error during --help generation.
+        # Commands in sub-groups do not count, and mutual exclusivity is not applied to them.
+        # Therefore this implementation assumes that `handlers` always contains at least one handler
+        # whose `add_argument_handler()` adds a command directly to `group`.
         if len(handlers) > 1:
             group = parser.add_mutually_exclusive_group()
         else:
             group = parser
+
         for handler_impl in handlers:
             handler_impl.add_argument_handler(group)
         return super(PebbleCommand, cls)._shared_parser() + [parser]
@@ -170,6 +175,9 @@ class PebbleTransportConfiguration(with_metaclass(SelfRegisteringTransportConfig
 
     @classmethod
     def add_argument_handler(cls):
+        """Note: this method must add at least one command directly to `cls`, not only a group,
+        because `cls` can be a mutually exclusive group (see PebbleCommand._shared_parser).
+        """
         raise NotImplementedError
 
     @classmethod
@@ -274,14 +282,15 @@ class PebbleTransportQemu(PebbleTransportConfiguration):
 
     @classmethod
     def add_argument_handler(cls, parser):
-        qemu_group = parser.add_argument_group()
-        qemu_group.add_argument('--qemu', nargs='?', const='localhost:12344', metavar='host',
+        # Ungrouped to apply mutual exclusivity; see PebbleCommand._shared_parser()
+        parser.add_argument('--qemu', nargs='?', const='localhost:12344', metavar='host',
                             help="Use this option to connect directly to a QEMU instance. "
                                  "Equivalent to PEBBLE_QEMU.")
+        qemu_group = parser.add_argument_group()
         qemu_group.add_argument('--pypkjs', action='store_true',
                             help="When using --qemu, also spawn pypkjs. Requires --platform.")
         qemu_group.add_argument('--platform', type=str, choices=get_pebble_platforms(),
-                            help="Platform for pypkjs when using --qemu --pypkjs.")
+                                help="When using --qemu --pypkjs, specify the platform.")
 
 
 class PebbleTransportCloudPebble(PebbleTransportConfiguration):
@@ -347,12 +356,13 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
 
     @classmethod
     def add_argument_handler(cls, parser):
+        # Ungrouped to apply mutual exclusivity; see PebbleCommand._shared_parser()
+        parser.add_argument('--emulator', type=str, help="Launch an emulator. Equivalent to PEBBLE_EMULATOR.",
+                            choices=get_pebble_platforms())
         emu_group = parser.add_argument_group()
-        emu_group.add_argument('--emulator', type=str, help="Launch an emulator. Equivalent to PEBBLE_EMULATOR.",
-                           choices=get_pebble_platforms())
-        emu_group.add_argument('--sdk', type=str, help="SDK version to launch. Defaults to the active SDK"
-                                                   " (currently {})".format(sdk_version()))
-        emu_group.add_argument('--vnc', action='store_true', help="Enable VNC server for the emulator")
+        emu_group.add_argument('--sdk', type=str, help="When using --emulator, SDK version to launch."
+                               " Defaults to the active SDK (currently {})".format(sdk_version()))
+        emu_group.add_argument('--vnc', action='store_true', help="When using --emulator, enable VNC server.")
 
 def register_children(parser):
     subparsers = parser.add_subparsers(title="command")
