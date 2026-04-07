@@ -282,13 +282,14 @@ class ManagedEmulatorTransport(WebsocketTransport):
             command.extend(["-vnc", ":1"])
 
         # Determine the correct machine for emery based on SDK version
-        emery_machine = 'pebble-robert-bb'
+        # Default to snowy-emery-bb (newer); only use robert-bb for known old SDK versions < 4.9
+        emery_machine = 'pebble-snowy-emery-bb'
         if self.platform == 'emery':
-            from packaging.version import parse as parse_version
-            # Strip any suffix for version comparison
             version_base = self.version.split('-')[0]
-            if parse_version(version_base) >= parse_version('4.9'):
-                emery_machine = 'pebble-snowy-emery-bb'
+            if re.match(r'^\d+(\.\d+)*$', version_base):
+                from packaging.version import parse as parse_version
+                if parse_version(version_base) < parse_version('4.9'):
+                    emery_machine = 'pebble-robert-bb'
 
         platform_args = {
             'gabbro': [
