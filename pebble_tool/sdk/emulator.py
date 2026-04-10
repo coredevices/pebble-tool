@@ -10,6 +10,7 @@ import logging
 import os
 import os.path
 import platform
+import re
 import shutil
 import signal
 import socket
@@ -28,6 +29,24 @@ from . import sdk_path, get_sdk_persist_dir, sdk_manager
 
 logger = logging.getLogger("pebble_tool.sdk.emulator")
 black_hole = open(os.devnull, 'w')
+
+_qemu_version_cache = None
+
+def get_qemu_version():
+    """Detect the QEMU major version. Returns the major version as an int, or None if detection fails."""
+    global _qemu_version_cache
+    if _qemu_version_cache is not None:
+        return _qemu_version_cache
+    qemu_bin = os.environ.get('PEBBLE_QEMU_PATH', 'qemu-pebble')
+    try:
+        result = subprocess.check_output([qemu_bin, '--version'], stderr=subprocess.STDOUT, text=True)
+        match = re.search(r'version (\d+)\.', result)
+        if match:
+            _qemu_version_cache = int(match.group(1))
+            return _qemu_version_cache
+    except (subprocess.CalledProcessError, OSError):
+        pass
+    return None
 
 def _to_text(data):
     if data is None:
@@ -266,15 +285,32 @@ class ManagedEmulatorTransport(WebsocketTransport):
             if not os.path.exists(path):
                 raise MissingEmulatorError("Can't launch emulator: missing required file at {}".format(path))
 
+        qemu_major = get_qemu_version()
+        logger.info("Detected QEMU major version: %s", qemu_major)
+
+        new_qemu = qemu_major is not None and qemu_major >= 3
+
+        # QEMU 3+ uses server=on,wait=off; older versions use server,nowait
+        if new_qemu:
+            tcp_opts = "server=on,wait=off"
+        else:
+            tcp_opts = "server,nowait"
+
+        # QEMU 10+ loads firmware via -kernel; older versions use -pflash
+        if new_qemu:
+            fw_args = ["-kernel", qemu_micro_flash]
+        else:
+            fw_args = ["-pflash", qemu_micro_flash]
+
         command = [
             qemu_bin,
             "-rtc", "base=localtime",
             "-serial", "null",
-            "-serial", "tcp::{},server,nowait".format(self.qemu_port),
-            "-serial", "tcp::{},server,nowait".format(self.qemu_serial_port),
-            "-pflash", qemu_micro_flash,
-            "-gdb", "tcp::{},server,nowait".format(self.qemu_gdb_port),
-            "-monitor", "tcp::{},server,nowait".format(self.qemu_monitor_port),
+            "-serial", "tcp::{},{}".format(self.qemu_port, tcp_opts),
+            "-serial", "tcp::{},{}".format(self.qemu_serial_port, tcp_opts),
+        ] + fw_args + [
+            "-gdb", "tcp::{},{}".format(self.qemu_gdb_port, tcp_opts),
+            "-monitor", "tcp::{},{}".format(self.qemu_monitor_port, tcp_opts),
         ]
 
         if self.vnc_enabled:
@@ -291,12 +327,17 @@ class ManagedEmulatorTransport(WebsocketTransport):
                 if parse_version(version_base) < parse_version('4.9'):
                     emery_machine = 'pebble-robert-bb'
 
+        # QEMU 10+ uses named block device for SPI; older versions use -pflash
+        if new_qemu:
+            spi_pflash = ['-drive', 'if=none,id=spi-flash,file={},format=raw'.format(qemu_spi_flash)]
+        else:
+            spi_pflash = ['-pflash', qemu_spi_flash]
+
         platform_args = {
             'gabbro': [
                 '-machine', 'pebble-spalding-gabbro-bb',
                 '-cpu', 'cortex-m4',
-                '-pflash', qemu_spi_flash,
-            ],
+            ] + spi_pflash,
             'flint': [
                 '-machine', 'pebble-silk-bb',
                 '-cpu', 'cortex-m4',
@@ -305,8 +346,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
             'emery': [
                 '-machine', emery_machine,
                 '-cpu', 'cortex-m4',
-                '-pflash', qemu_spi_flash,
-            ],
+            ] + spi_pflash,
             'diorite': [
                 '-machine', 'pebble-silk-bb',
                 '-cpu', 'cortex-m4',
@@ -315,13 +355,11 @@ class ManagedEmulatorTransport(WebsocketTransport):
             'chalk': [
                 '-machine', 'pebble-s4-bb',
                 '-cpu', 'cortex-m4',
-                '-pflash', qemu_spi_flash,
-            ],
+            ] + spi_pflash,
             'basalt': [
                 '-machine', 'pebble-snowy-bb',
                 '-cpu', 'cortex-m4',
-                '-pflash', qemu_spi_flash,
-            ],
+            ] + spi_pflash,
             'aplite': [
                 '-machine', 'pebble-bb2',
                 '-cpu', 'cortex-m3',
