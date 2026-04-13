@@ -99,6 +99,91 @@ def test_collect_new_app_details_non_interactive_watchface(monkeypatch):
     assert details["category"] is None
 
 
+def test_collect_screenshot_assets_non_interactive_uses_local_files(monkeypatch, tmp_path):
+    png = tmp_path / "emery_screenshot.png"
+    gif = tmp_path / "emery_preview.gif"
+    png.write_bytes(b"")
+    gif.write_bytes(b"")
+
+    args = Namespace(
+        non_interactive=True,
+        screenshots=[str(png), str(gif)],
+        capture_gif_all_platforms=False,
+        capture_all_platforms=False,
+        v=0,
+        sdk=None,
+    )
+    cmd = PublishCommand()
+    screenshot_paths, gif_paths = [], []
+    result_gifs, result_screenshots = cmd._collect_screenshot_assets(args, {}, allow_skip=False)
+    assert result_screenshots == [str(png)]
+    assert result_gifs == [str(gif)]
+
+
+def test_collect_screenshot_assets_non_interactive_local_files_separates_gifs(tmp_path):
+    files = [
+        tmp_path / "emery_screenshot.png",
+        tmp_path / "basalt_screenshot.png",
+        tmp_path / "emery_preview.gif",
+    ]
+    for f in files:
+        f.write_bytes(b"")
+
+    args = Namespace(
+        non_interactive=True,
+        screenshots=[str(f) for f in files],
+        capture_gif_all_platforms=False,
+        capture_all_platforms=False,
+        v=0,
+        sdk=None,
+    )
+    cmd = PublishCommand()
+    result_gifs, result_screenshots = cmd._collect_screenshot_assets(args, {}, allow_skip=False)
+    assert len(result_screenshots) == 2
+    assert len(result_gifs) == 1
+    assert all(p.endswith(".gif") for p in result_gifs)
+
+
+def test_collect_screenshot_assets_non_interactive_missing_file_raises(tmp_path):
+    existing = tmp_path / "emery_screenshot.png"
+    existing.write_bytes(b"")
+
+    args = Namespace(
+        non_interactive=True,
+        screenshots=[str(existing), "/nonexistent/missing.png"],
+        capture_gif_all_platforms=False,
+        capture_all_platforms=False,
+        v=0,
+        sdk=None,
+    )
+    cmd = PublishCommand()
+    with pytest.raises(ToolError, match="Screenshot file not found"):
+        cmd._collect_screenshot_assets(args, {}, allow_skip=False)
+
+
+def test_collect_screenshot_assets_non_interactive_no_local_files_falls_back_to_emulator(monkeypatch):
+    captured = {}
+
+    def fake_capture(self, args):
+        captured["called"] = True
+        return ["emery_preview.gif"], ["emery_screenshot.png"]
+
+    monkeypatch.setattr(PublishCommand, "_capture_with_emulator", fake_capture)
+
+    args = Namespace(
+        non_interactive=True,
+        screenshots=None,
+        capture_gif_all_platforms=False,
+        capture_all_platforms=False,
+        v=0,
+        sdk=None,
+    )
+    cmd = PublishCommand()
+    result_gifs, result_screenshots = cmd._collect_screenshot_assets(args, {}, allow_skip=False)
+    assert captured.get("called") is True
+    assert result_screenshots == ["emery_screenshot.png"]
+
+
 def test_collect_new_app_details_non_interactive_requires_description():
     args = Namespace(
         non_interactive=True,

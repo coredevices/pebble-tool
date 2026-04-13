@@ -447,6 +447,16 @@ class PublishCommand(BaseCommand):
 
     def _collect_screenshot_assets(self, args, pbw_metadata, allow_skip=False):
         if args.non_interactive:
+            local_files = getattr(args, "screenshots", None) or []
+            if local_files:
+                for p in local_files:
+                    if not os.path.exists(p):
+                        raise ToolError("Screenshot file not found: {}".format(p))
+                gif_paths = [p for p in local_files if p.lower().endswith(".gif")]
+                screenshot_paths = [p for p in local_files if not p.lower().endswith(".gif")]
+                if not allow_skip:
+                    self._validate_screenshot_assets(gif_paths, screenshot_paths)
+                return gif_paths, screenshot_paths
             gif_paths, screenshot_paths = self._capture_with_emulator(args)
             if not allow_skip:
                 self._validate_screenshot_assets(gif_paths, screenshot_paths)
@@ -980,4 +990,7 @@ class PublishCommand(BaseCommand):
                             help="Path to iconSmall file used when creating a new app.")
         parser.add_argument("--icon-large", default=None,
                             help="Path to iconLarge file used when creating a new app.")
+        parser.add_argument("--screenshots", nargs="+", default=None, metavar="FILE",
+                            help="Local screenshot/GIF files to upload in --non-interactive mode. "
+                                 "Filenames must start with the platform name, e.g. emery_screenshot.png.")
         return parser
