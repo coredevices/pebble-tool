@@ -144,6 +144,23 @@ def test_collect_screenshot_assets_non_interactive_local_files_separates_gifs(tm
     assert all(p.endswith(".gif") for p in result_gifs)
 
 
+def test_collect_screenshot_assets_non_interactive_missing_file_raises(tmp_path):
+    existing = tmp_path / "emery_screenshot.png"
+    existing.write_bytes(b"")
+
+    args = Namespace(
+        non_interactive=True,
+        screenshots=[str(existing), "/nonexistent/missing.png"],
+        capture_gif_all_platforms=False,
+        capture_all_platforms=False,
+        v=0,
+        sdk=None,
+    )
+    cmd = PublishCommand()
+    with pytest.raises(ToolError, match="Screenshot file not found"):
+        cmd._collect_screenshot_assets(args, {}, allow_skip=False)
+
+
 def test_collect_screenshot_assets_non_interactive_no_local_files_falls_back_to_emulator(monkeypatch):
     captured = {}
 

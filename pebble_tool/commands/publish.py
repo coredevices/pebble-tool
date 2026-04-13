@@ -449,6 +449,9 @@ class PublishCommand(BaseCommand):
         if args.non_interactive:
             local_files = getattr(args, "screenshots", None) or []
             if local_files:
+                for p in local_files:
+                    if not os.path.exists(p):
+                        raise ToolError("Screenshot file not found: {}".format(p))
                 gif_paths = [p for p in local_files if p.lower().endswith(".gif")]
                 screenshot_paths = [p for p in local_files if not p.lower().endswith(".gif")]
                 if not allow_skip:
