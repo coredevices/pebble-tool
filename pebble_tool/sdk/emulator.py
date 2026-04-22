@@ -288,18 +288,13 @@ class ManagedEmulatorTransport(WebsocketTransport):
         qemu_major = get_qemu_version()
         logger.info("Detected QEMU major version: %s", qemu_major)
 
-        new_qemu = qemu_major is not None and qemu_major >= 3
+        new_qemu = qemu_major is not None and qemu_major >= 7
 
-        # QEMU 3+ uses server=on,wait=off; older versions use server,nowait
         if new_qemu:
             tcp_opts = "server=on,wait=off"
-        else:
-            tcp_opts = "server,nowait"
-
-        # QEMU 10+ loads firmware via -kernel; older versions use -pflash
-        if new_qemu:
             fw_args = ["-kernel", qemu_micro_flash]
         else:
+            tcp_opts = "server,nowait"
             fw_args = ["-pflash", qemu_micro_flash]
 
         command = [
@@ -317,36 +312,68 @@ class ManagedEmulatorTransport(WebsocketTransport):
             command.extend(["-L", os.path.join(sdk_manager.root_path_for_sdk(self.version), 'toolchain', 'lib', 'pc-bios')])
             command.extend(["-vnc", ":1"])
 
-        # Determine the correct machine for emery based on SDK version
-        # Default to snowy-emery-bb (newer); only use robert-bb for known old SDK versions < 4.9
-        emery_machine = 'pebble-snowy-emery-bb'
-        if self.platform == 'emery':
-            version_base = self.version.split('-')[0]
-            if re.match(r'^\d+(\.\d+)*$', version_base):
-                from packaging.version import parse as parse_version
-                if parse_version(version_base) < parse_version('4.9'):
-                    emery_machine = 'pebble-robert-bb'
+        # qemu_emery / qemu_flint / qemu_gabbro board defs are only produced
+        # by SDKs > 4.9.148. Older SDKs use the legacy machine names.
+        # Unparseable versions (tintin, dev builds) default to the new boards.
+        from packaging.version import parse as parse_version
+        sdk_version = None
+        version_base = self.version.split('-')[0] if self.version else ''
+        if re.match(r'^\d+(\.\d+)*$', version_base):
+            sdk_version = parse_version(version_base)
+        use_new_boards = sdk_version is None or sdk_version > parse_version('4.9.148')
 
-        # QEMU 10+ uses named block device for SPI; older versions use -pflash
+        if use_new_boards:
+            emery_machine = 'pebble-emery'
+            gabbro_machine = 'pebble-gabbro'
+            flint_machine = 'pebble-flint'
+            emery_cpu = 'cortex-m33'
+            gabbro_cpu = 'cortex-m33'
+        else:
+            emery_machine = 'pebble-robert-bb' if sdk_version < parse_version('4.9') else 'pebble-snowy-emery-bb'
+            gabbro_machine = 'pebble-spalding-gabbro-bb'
+            flint_machine = 'pebble-silk-bb'
+            emery_cpu = 'cortex-m4'
+            gabbro_cpu = 'cortex-m4'
+
+        if use_new_boards:
+            if self.vnc_enabled:
+                audio_driver = 'none'
+            else:
+                audio_driver = 'coreaudio' if platform.system() == 'Darwin' else 'sdl'
+            audio_args = ['-audio', 'driver={},id=audio0'.format(audio_driver)]
+        else:
+            audio_args = []
+
         if new_qemu:
             spi_pflash = ['-drive', 'if=none,id=spi-flash,file={},format=raw'.format(qemu_spi_flash)]
         else:
             spi_pflash = ['-pflash', qemu_spi_flash]
 
+        # New qemu-pebble boards expose flash as if=mtd; legacy machines keep
+        # their original flash arg (spi_pflash for emery/gabbro, -mtdblock for flint).
+        if use_new_boards:
+            new_mtd_flash = ['-drive', 'if=mtd,format=raw,file={}'.format(qemu_spi_flash)]
+            emery_flash = new_mtd_flash
+            gabbro_flash = new_mtd_flash
+            flint_flash = new_mtd_flash
+        else:
+            emery_flash = spi_pflash
+            gabbro_flash = spi_pflash
+            flint_flash = ['-mtdblock', qemu_spi_flash]
+
         platform_args = {
             'gabbro': [
-                '-machine', 'pebble-spalding-gabbro-bb',
-                '-cpu', 'cortex-m4',
-            ] + spi_pflash,
+                '-machine', gabbro_machine,
+                '-cpu', gabbro_cpu,
+            ] + gabbro_flash,
             'flint': [
-                '-machine', 'pebble-silk-bb',
+                '-machine', flint_machine,
                 '-cpu', 'cortex-m4',
-                '-mtdblock', qemu_spi_flash,
-            ],
+            ] + flint_flash + audio_args,
             'emery': [
                 '-machine', emery_machine,
-                '-cpu', 'cortex-m4',
-            ] + spi_pflash,
+                '-cpu', emery_cpu,
+            ] + emery_flash + audio_args,
             'diorite': [
                 '-machine', 'pebble-silk-bb',
                 '-cpu', 'cortex-m4',
@@ -368,6 +395,10 @@ class ManagedEmulatorTransport(WebsocketTransport):
         }
 
         command.extend(platform_args[self.platform])
+
+        if new_qemu and not self.vnc_enabled:
+            display_type = 'cocoa' if platform.system() == 'Darwin' else 'gtk'
+            command.extend(['-display', '{},show-cursor=on'.format(display_type)])
 
         # Prepare environment with bundled dylibs for macOS
         env = os.environ.copy()
