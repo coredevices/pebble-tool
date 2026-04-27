@@ -2,10 +2,7 @@
 __author__ = 'katharine'
 
 import argparse
-import contextlib
-import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -58,9 +55,8 @@ class BuildCommand(SDKProjectCommand):
                     raise ToolError("This is a Moddable project, but the currently active SDK does not have Moddable tools. "
                                     "Please install an SDK with Moddable support to build this project.")
                 self.run_moddable_prebuild()
-            with self._temporary_sdk_compatible_version():
-                self._waf("configure", extra_env=extra_env, args=waf)
-                self._waf("build", args=waf)
+            self._waf("configure", extra_env=extra_env, args=waf)
+            self._waf("build", args=waf)
         except subprocess.CalledProcessError:
             duration = time.time() - start_time
             post_event("app_build_failed", build_time=duration)
@@ -69,67 +65,6 @@ class BuildCommand(SDKProjectCommand):
             duration = time.time() - start_time
             has_js = os.path.exists(os.path.join('src', 'js'))
             post_event("app_build_succeeded", has_js=has_js, line_counts=self._get_line_counts(), build_time=duration)
-
-    @contextlib.contextmanager
-    def _temporary_sdk_compatible_version(self):
-        """
-        Pebble's legacy waf expects patch version 0 (x.y.0) in project metadata.
-        To support publishing semantic patch versions (e.g. 1.0.1), temporarily
-        normalize metadata for build and restore the original file afterwards.
-        """
-        file_path = None
-        raw = None
-        patched = None
-        normalized = None
-
-        def _normalize_semver(version):
-            match = re.match(r"^(\d+)\.(\d+)\.(\d+)$", str(version or "").strip())
-            if not match:
-                return None
-            major, minor, patch = match.groups()
-            if patch == "0":
-                return None
-            return "{}.{}.0".format(major, minor)
-
-        try:
-            if hasattr(self.project, "project_info"):
-                candidate = os.path.join(self.project.project_dir, "package.json")
-                try:
-                    with open(candidate, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    normalized = _normalize_semver(data.get("version"))
-                    if normalized:
-                        file_path = candidate
-                        raw = json.dumps(data, indent=2)
-                        data["version"] = normalized
-                        patched = json.dumps(data, indent=2) + "\n"
-                except Exception:
-                    pass
-            else:
-                candidate = os.path.join(self.project.project_dir, "appinfo.json")
-                try:
-                    with open(candidate, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    normalized = _normalize_semver(data.get("versionLabel"))
-                    if normalized:
-                        file_path = candidate
-                        raw = json.dumps(data, indent=2)
-                        data["versionLabel"] = normalized
-                        patched = json.dumps(data, indent=2) + "\n"
-                except Exception:
-                    pass
-
-            if file_path and patched is not None and raw is not None:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(patched)
-            yield
-        finally:
-            if file_path and raw is not None:
-                try:
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(raw + "\n")
-                except Exception:
-                    pass
 
     def run_moddable_prebuild(self):
         print("Running Moddable prebuild.")
