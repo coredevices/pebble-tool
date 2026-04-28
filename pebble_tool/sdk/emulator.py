@@ -397,7 +397,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
         command.extend(platform_args[self.platform])
 
         if new_qemu and not self.vnc_enabled:
-            display_type = 'cocoa' if platform.system() == 'Darwin' else 'gtk'
+            display_type = 'cocoa' if platform.system() == 'Darwin' else 'sdl'
             command.extend(['-display', '{},show-cursor=on'.format(display_type)])
 
         # Prepare environment with bundled dylibs for macOS
