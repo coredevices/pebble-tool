@@ -156,6 +156,8 @@ class NewProjectCommand(SDKCommand):
                 raise ToolError("The currently active SDK does not have Moddable tools. "
                                 "Please install an SDK with Moddable support to use --alloy.")
             options = ['moddable']
+            if args.ai:
+                options.append('ai')
         else:
             options = ['app']
             if args.javascript:

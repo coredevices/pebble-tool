@@ -17,7 +17,12 @@
             "src/embeddedjs/manifest.json": "moddable/manifest.json",
             "src/pkjs/index.js": "moddable/index.js",
             "package.json": "moddable/package.json",
-            "wscript": "moddable/wscript"
+            "wscript": "moddable/wscript",
+            "README.md": "moddable/README.md"
+        },
+        "ai": {
+            "CLAUDE.md": "app/ai.md",
+            ".cursor/rules/pebble.mdc": "app/ai.md"
         }
     },
     "app": {
@@ -25,6 +30,7 @@
             "src/c/${project_name}.c": "app/main.c",
             "wscript": "app/wscript",
             "package.json": "app/package.json",
+            "README.md": "app/README.md",
             "resources": null
         },
         "worker": {
@@ -47,6 +53,7 @@
             "include/${project_name}.h": "lib/lib.h",
             "wscript": "lib/wscript",
             "package.json": "lib/package.json",
+            "README.md": "lib/README.md",
             "src/resources": null
         },
         "javascript": {
