@@ -17,12 +17,24 @@ logger = logging.getLogger("pebble_tool.util.browser")
 class BrowserController(object):
     def __init__(self):
         self.port = None
+        self.address = None
+    
+    def configure_port(self, port):
+        self.port = port
+
+    def configure_address(self, address):
+        self.address = address
 
     def open_config_page(self, url, callback):
-        self.port = port = self._choose_port()
-        url = self.url_append_params(url, {'return_to': 'http://localhost:{}/close?'.format(port)})
+        if self.port == None:
+            self.port = self._choose_port()
+        host = 'http://localhost:{}/close?'.format(self.port)
+        if self.address:
+            host = '{}/close?'.format(self.address)
+        url = self.url_append_params(url, {'return_to': host})
         webbrowser.open_new(url)
-        self.serve_page(port, callback)
+        self.serve_page(int(self.port), callback)
+        self.__init__()
 
     def serve_page(self, port, callback):
         # This is an array so AppConfigHandler doesn't create an instance variable when trying to set the state to False
