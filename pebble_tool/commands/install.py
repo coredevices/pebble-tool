@@ -1,4 +1,3 @@
-
 __author__ = 'katharine'
 
 import os
@@ -21,6 +20,25 @@ class InstallCommand(PebbleCommand):
 
     def __call__(self, args):
         super(InstallCommand, self).__call__(args)
+        
+        # --- NEW THROTTLE INJECTION ---
+        if args.throttle is not None:
+            delay = args.throttle
+            import time
+            import logging
+            from libpebble2.communication import PebbleConnection
+            
+            logging.getLogger(__name__).info("Injecting %ss transfer throttle to prevent emulator buffer overflow...", delay)
+            
+            original_send = PebbleConnection.send_packet
+            
+            def throttled_send(self, packet):
+                time.sleep(delay)
+                return original_send(self, packet)
+                
+            PebbleConnection.send_packet = throttled_send
+        # ------------------------------
+
         try:
             ToolAppInstaller(self.pebble, args.pbw).install(force_install=args.force)
         except IOError as e:
@@ -65,6 +83,8 @@ class InstallCommand(PebbleCommand):
     def add_parser(cls, parser):
         parser = super(InstallCommand, cls).add_parser(parser)
         parser.add_argument('pbw', help="Path to app to install.", nargs='?', default=None)
+        parser.add_argument('--throttle', nargs='?', const=0.004, type=float, 
+                            help="Throttle transfer (in seconds) to prevent QEMU timeouts with large apps. Defaults to 0.002.")
         parser.add_argument('--force', action="store_true",
                             help="Force install even if the pbw doesn't support the connected platform")
         parser.add_argument('--logs', action="store_true", help="Enable logs")
