@@ -17,6 +17,8 @@ class Config(object):
                 self.content = json.load(f)
         except IOError:
             self.content = {}
+        except json.JSONDecodeError:
+            self.content = {}
 
     def save(self):
         with open(self.path, 'w') as f:
