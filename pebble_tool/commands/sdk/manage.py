@@ -1,6 +1,7 @@
 
 __author__ = "katharine"
 
+import argparse
 import collections
 import os
 import re
@@ -20,6 +21,9 @@ class SDKManager(BaseCommand):
 
     def __call__(self, args):
         super(SDKManager, self).__call__(args)
+        server = getattr(args, 'server', None) or os.environ.get('PEBBLE_SDK_SERVER')
+        if server:
+            sdk_manager.DOWNLOAD_SERVER = server.rstrip('/')
         args.sub_func(args)
 
 
@@ -28,30 +32,39 @@ class SDKManager(BaseCommand):
         parser = super(SDKManager, cls).add_parser(parser)
         subparsers = parser.add_subparsers(title="subcommand")
 
-        list_parser = subparsers.add_parser("list", help="Lists available SDKs.")
+        server_parent = argparse.ArgumentParser(add_help=False)
+        server_parent.add_argument('--server', metavar='URL',
+                                   help="Override the SDK download server URL "
+                                        "(default: {}). Equivalent to PEBBLE_SDK_SERVER.".format(
+                                            sdk_manager.DOWNLOAD_SERVER))
+
+        list_parser = subparsers.add_parser("list", parents=[server_parent], help="Lists available SDKs.")
         list_parser.set_defaults(sub_func=cls.do_list)
 
-        install_parser = subparsers.add_parser("install", help="Installs the given SDK.")
+        install_parser = subparsers.add_parser("install", parents=[server_parent], help="Installs the given SDK.")
         group = install_parser.add_mutually_exclusive_group(required=True)
         group.add_argument('version', nargs='?', help="Version to install, or 'latest' for the latest.")
         group.add_argument('--tintin', help="Path to a copy of the tintin source (internal only).")
         install_parser.set_defaults(sub_func=cls.do_install)
 
-        activate_parser = subparsers.add_parser("activate", help="Makes the given, installed SDK active.")
+        activate_parser = subparsers.add_parser("activate", parents=[server_parent],
+                                                help="Makes the given, installed SDK active.")
         activate_parser.add_argument('version', help="Version to make active.")
         activate_parser.set_defaults(sub_func=cls.do_activate)
 
-        uninstall_parser = subparsers.add_parser("uninstall", help="Uninstalls the given SDK.")
+        uninstall_parser = subparsers.add_parser("uninstall", parents=[server_parent], help="Uninstalls the given SDK.")
         uninstall_parser.add_argument('--keep-data', action="store_true", help="Skip deleting SDK-specific data "
                                                                                "such as persistent storage.")
         uninstall_parser.add_argument('version', help="Version to uninstall.")
         uninstall_parser.set_defaults(sub_func=cls.do_uninstall)
 
-        set_channel_parser = subparsers.add_parser("set-channel", help="Sets the SDK channel.")
+        set_channel_parser = subparsers.add_parser("set-channel", parents=[server_parent],
+                                                   help="Sets the SDK channel.")
         set_channel_parser.add_argument('channel', help="The channel to use.")
         set_channel_parser.set_defaults(sub_func=cls.do_set_channel)
 
-        include_path_parser = subparsers.add_parser("include-path", help="Prints out the SDK include path.")
+        include_path_parser = subparsers.add_parser("include-path", parents=[server_parent],
+                                                    help="Prints out the SDK include path.")
         include_path_parser.add_argument("platform", help="The platform to give includes for.")
         include_path_parser.add_argument("--sdk", help="Optional SDK version override.")
         include_path_parser.set_defaults(sub_func=cls.do_include_path)
