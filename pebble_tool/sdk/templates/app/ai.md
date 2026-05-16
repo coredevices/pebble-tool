@@ -70,6 +70,8 @@ The application follows the standard Pebble app architecture:
 
 The full Pebble SDK documentation is available at https://developer.repebble.com.
 
+An index of every page is at https://developer.repebble.com/llms.txt. Use it to discover what's available. Every page also has a Markdown version: append `.md` to any documentation URL to fetch plain Markdown instead of HTML (e.g. `https://developer.repebble.com/guides/events-and-services/buttons.md`). Prefer the `.md` form when reading docs.
+
 Main Categories:
 - Tutorials - Step-by-step learning (C watchface tutorial in 5 parts, advanced topics)
 - Developer Guides - Comprehensive reference organized by topic
