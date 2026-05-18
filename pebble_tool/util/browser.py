@@ -1,13 +1,16 @@
 
 
-from six.moves import BaseHTTPServer
+import contextlib
 import logging
 import os
-import pyqrcode
 import socket
+import tempfile
 import time
-from six.moves.urllib import parse as urlparse
 import webbrowser
+
+import pyqrcode
+from six.moves import BaseHTTPServer
+from six.moves.urllib import parse as urlparse
 
 from .phone_sensor import SENSOR_PAGE_HTML
 
@@ -21,8 +24,24 @@ class BrowserController(object):
     def open_config_page(self, url, callback):
         self.port = port = self._choose_port()
         url = self.url_append_params(url, {'return_to': 'http://localhost:{}/close?'.format(port)})
-        webbrowser.open_new(url)
-        self.serve_page(port, callback)
+
+        if url.startswith('file'):
+            webbrowser.open_new(url)
+            self.serve_page(port, callback)
+        else:
+            # The URL argument length limit can quickly be exceeded by a Clay config page
+            # so instead of providing the URL directly, write it to a temporary file.
+            # Default Ubuntu firefox installation can't access /tmp
+            # so place the temporary file in the user's home directory.
+            with tempfile.NamedTemporaryFile(dir=os.path.expanduser("~"),
+                                             delete_on_close=False,
+                                             prefix="pebble-tool-emu-app-config-") as temp:
+                with open(temp.name, mode="w") as f:
+                    f.write(f'<head><meta http-equiv="refresh" content="0;URL={url}"></head>')
+                tempfile_url = f"file://{temp.name}"
+
+                webbrowser.open_new(tempfile_url)
+                self.serve_page(port, callback)
 
     def serve_page(self, port, callback):
         # This is an array so AppConfigHandler doesn't create an instance variable when trying to set the state to False
