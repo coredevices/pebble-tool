@@ -414,7 +414,9 @@ class ManagedEmulatorTransport(WebsocketTransport):
             logger.debug("Set DYLD_LIBRARY_PATH=%s", env['DYLD_LIBRARY_PATH'])
 
         logger.info("Qemu command: %s", subprocess.list2cmdline(command))
-        process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output(), env=env)
+        # Detached into its own process group so a terminal Ctrl+C doesn't kill it.
+        process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output(), env=env,
+                                   start_new_session=True)
         time.sleep(0.2)
         if process.poll() is not None:
             try:
@@ -495,7 +497,9 @@ class ManagedEmulatorTransport(WebsocketTransport):
         ]
         
         logger.info("websockify command: %s", subprocess.list2cmdline(command))
-        process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output())
+        # Detached into its own process group so a terminal Ctrl+C doesn't kill it.
+        process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output(),
+                                   start_new_session=True)
         time.sleep(0.5)
         if process.poll() is not None:
             try:
@@ -526,7 +530,9 @@ class ManagedEmulatorTransport(WebsocketTransport):
         if logger.getEffectiveLevel() <= logging.DEBUG:
             command.append('--debug')
         logger.info("pypkjs command: %s", subprocess.list2cmdline(command))
-        process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output())
+        # Detached into its own process group so a terminal Ctrl+C doesn't kill it.
+        process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output(),
+                                   start_new_session=True)
         time.sleep(0.5)
         if process.poll() is not None:
             try:
@@ -757,7 +763,9 @@ class ExternalQemuTransport(WebsocketTransport):
         if logger.getEffectiveLevel() <= logging.DEBUG:
             command.append('--debug')
         logger.info("pypkjs command: %s", subprocess.list2cmdline(command))
-        process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output())
+        # Detached into its own process group so a terminal Ctrl+C doesn't kill it.
+        process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output(),
+                                   start_new_session=True)
         time.sleep(0.5)
         if process.poll() is not None:
             try:
