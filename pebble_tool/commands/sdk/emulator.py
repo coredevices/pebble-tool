@@ -8,6 +8,7 @@ import signal
 
 from ..base import BaseCommand
 from pebble_tool.sdk import get_sdk_persist_dir, get_persist_dir, get_pebble_platforms
+from pebble_tool.util.config import config
 import pebble_tool.sdk.emulator as emulator
 
 
@@ -53,6 +54,8 @@ class WipeCommand(BaseCommand):
         super(WipeCommand, self).__call__(args)
         if args.everything:
             shutil.rmtree(get_persist_dir())
+            # Don't let cleanup at exit recreate the directory we just wiped.
+            config.skip_save = True
         else:
             for platform in get_pebble_platforms():
                 shutil.rmtree(get_sdk_persist_dir(platform))
