@@ -12,6 +12,7 @@ from libpebble2.services.install import AppInstaller
 from .base import PebbleCommand
 from ..util import is_debug_build
 from ..util.logs import PebbleLogPrinter, QemuLogPrinter
+from ..util.xsbug import XsbugCtrlPrinter, launch_xsbug, wait_for_listener, should_debug_moddable
 from ..exceptions import ToolError
 
 
@@ -39,6 +40,14 @@ class InstallCommand(PebbleCommand):
                 
             PebbleConnection.send_packet = throttled_send
         # ------------------------------
+
+        # For a moddable project built with --debug, launch xsbug and start bridging
+        # the JS debugger before the app boots so it can connect on startup.
+        xsbug_printer = None
+        if should_debug_moddable():
+            launch_xsbug()
+            wait_for_listener()
+            xsbug_printer = XsbugCtrlPrinter(self.pebble)
 
         # A --debug build produces a `_debug`-suffixed bundle; prefer it when present.
         pbw = args.pbw
@@ -78,20 +87,31 @@ class InstallCommand(PebbleCommand):
             try:
                 log_printer.wait()
             except KeyboardInterrupt:
-                # Clean up both log printers
                 log_printer.stop()
                 qemu_log_printer.stop()
+                if xsbug_printer:
+                    xsbug_printer.stop()
                 raise
         elif log_printer:
-            log_printer.wait()
+            try:
+                log_printer.wait()
+            finally:
+                if xsbug_printer:
+                    xsbug_printer.stop()
         elif qemu_log_printer:
-            qemu_log_printer.wait()
+            try:
+                qemu_log_printer.wait()
+            finally:
+                if xsbug_printer:
+                    xsbug_printer.stop()
+        elif xsbug_printer:
+            xsbug_printer.wait()
 
     @classmethod
     def add_parser(cls, parser):
         parser = super(InstallCommand, cls).add_parser(parser)
         parser.add_argument('pbw', help="Path to app to install.", nargs='?', default=None)
-        parser.add_argument('--throttle', nargs='?', const=0.004, type=float,
+        parser.add_argument('--throttle', nargs='?', const=0.004, type=float, 
                             help="Throttle transfer (in seconds) to prevent QEMU timeouts with large apps. Defaults to 0.002.")
         parser.add_argument('--force', action="store_true",
                             help="Force install even if the pbw doesn't support the connected platform")
