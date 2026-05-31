@@ -1,7 +1,17 @@
 __author__ = 'katharine'
 
+import os
 import os.path
 import platform
+
+# Marker written by `pebble build --debug`; tells `pebble install`/`pebble logs`
+# that the current project's last build was a debug build.
+DEBUG_BUILD_MARKER = os.path.join('build', '.pebble_debug')
+
+
+def is_debug_build():
+    """True if the project in cwd was last built with `pebble build --debug`."""
+    return os.path.exists(DEBUG_BUILD_MARKER)
 
 
 def get_persist_dir():

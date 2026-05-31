@@ -49,12 +49,14 @@ class BuildCommand(SDKProjectCommand):
                 pass
             extra_env = {}
             if args.debug:
-                extra_env = {'CFLAGS': os.environ.get('CFLAGS', '') + ' -O0'}
+                # -O0 for easier stepping; PBL_DEBUG signals a debug build to app C code
+                # (the Alloy template uses it to enable the xsbug JS debugger).
+                extra_env = {'CFLAGS': os.environ.get('CFLAGS', '') + ' -O0 -DPBL_DEBUG'}
             if self.project.project_type == 'moddable':
                 if not has_moddable_tools():
                     raise ToolError("This is a Moddable project, but the currently active SDK does not have Moddable tools. "
                                     "Please install an SDK with Moddable support to build this project.")
-                self.run_moddable_prebuild()
+                self.run_moddable_prebuild(debug=args.debug)
             self._waf("configure", extra_env=extra_env, args=waf)
             self._waf("build", args=waf)
         except subprocess.CalledProcessError:
@@ -65,9 +67,31 @@ class BuildCommand(SDKProjectCommand):
             duration = time.time() - start_time
             has_js = os.path.exists(os.path.join('src', 'js'))
             post_event("app_build_succeeded", has_js=has_js, line_counts=self._get_line_counts(), build_time=duration)
+            self._finalize_debug_build(args.debug)
 
-    def run_moddable_prebuild(self):
-        print("Running Moddable prebuild.")
+    @staticmethod
+    def _finalize_debug_build(debug):
+        """Record whether this was a debug build and give the debug bundle a `_debug`
+        suffix so release and debug pbws can coexist. The marker lets `pebble install`
+        / `pebble logs` pick the debug bundle and (for moddable) auto-launch xsbug."""
+        from pebble_tool.util import DEBUG_BUILD_MARKER
+        stem = os.path.basename(os.getcwd())
+        release_pbw = os.path.join('build', '{}.pbw'.format(stem))
+        debug_pbw = os.path.join('build', '{}_debug.pbw'.format(stem))
+        if debug:
+            with open(DEBUG_BUILD_MARKER, 'w'):
+                pass
+            if os.path.exists(release_pbw):
+                os.replace(release_pbw, debug_pbw)
+                print("Built debug bundle: {}".format(debug_pbw))
+        elif os.path.exists(DEBUG_BUILD_MARKER):
+            os.remove(DEBUG_BUILD_MARKER)
+
+    def run_moddable_prebuild(self, debug=False):
+        print("Running Moddable prebuild ({} build).".format("debug" if debug else "release"))
+        # In a debug build, mcrun emits the mod with xsbug debugging info into a
+        # `debug/` directory instead of `release/`.
+        variant = 'debug' if debug else 'release'
         try:
             os.makedirs('build', exist_ok=True)
 
@@ -83,11 +107,13 @@ class BuildCommand(SDKProjectCommand):
                     '-o', mcrun_output_dir,
                     '-s', 'tech.moddable.pebble'
                 ]
+                if debug:
+                    cmd.append('-d')
                 print(f"Running {' '.join(cmd)}")
                 subprocess.run(cmd, check=True)
 
                 # Copy mc.xsa to where the SDK expects it
-                src = f'{mcrun_output_dir}/bin/pebble/release/embeddedjs/mc.xsa'
+                src = f'{mcrun_output_dir}/bin/pebble/{variant}/embeddedjs/mc.xsa'
                 dst = f'build/mods/{platform}/mc.xsa'
                 shutil.copy2(src, dst)
                 print(f"Copied Moddable mod for {platform}")

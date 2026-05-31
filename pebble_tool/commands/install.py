@@ -10,6 +10,7 @@ from libpebble2.exceptions import TimeoutError
 from libpebble2.services.install import AppInstaller
 
 from .base import PebbleCommand
+from ..util import is_debug_build
 from ..util.logs import PebbleLogPrinter, QemuLogPrinter
 from ..exceptions import ToolError
 
@@ -39,8 +40,15 @@ class InstallCommand(PebbleCommand):
             PebbleConnection.send_packet = throttled_send
         # ------------------------------
 
+        # A --debug build produces a `_debug`-suffixed bundle; prefer it when present.
+        pbw = args.pbw
+        if pbw is None and is_debug_build():
+            debug_pbw = 'build/{}_debug.pbw'.format(os.path.basename(os.getcwd()))
+            if os.path.exists(debug_pbw):
+                pbw = debug_pbw
+
         try:
-            ToolAppInstaller(self.pebble, args.pbw).install(force_install=args.force)
+            ToolAppInstaller(self.pebble, pbw).install(force_install=args.force)
         except IOError as e:
             if args.pbw is None:
                 raise ToolError("You must either run this command from a project directory or specify the pbw "
@@ -83,7 +91,7 @@ class InstallCommand(PebbleCommand):
     def add_parser(cls, parser):
         parser = super(InstallCommand, cls).add_parser(parser)
         parser.add_argument('pbw', help="Path to app to install.", nargs='?', default=None)
-        parser.add_argument('--throttle', nargs='?', const=0.004, type=float, 
+        parser.add_argument('--throttle', nargs='?', const=0.004, type=float,
                             help="Throttle transfer (in seconds) to prevent QEMU timeouts with large apps. Defaults to 0.002.")
         parser.add_argument('--force', action="store_true",
                             help="Force install even if the pbw doesn't support the connected platform")
