@@ -32,7 +32,7 @@ from .commands.base import register_children
 from .commands import (install, logs, screenshot, timeline, emucontrol, ping, account, repl,
                        transcription_server, data_logging, publish, firmware, appmessage)
 from .commands.sdk import create, emulator
-from .commands.sdk.project import package, analyse_size, convert, debug
+from .commands.sdk.project import package, analyse_size, convert, debug, compile_commands
 
 def run_tool(args=None):
     urllib3.disable_warnings()  # sigh. :(
