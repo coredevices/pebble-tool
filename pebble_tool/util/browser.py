@@ -107,10 +107,10 @@ class BrowserController(object):
                                                              websocket_port="'{}'".format(pypkjs_port)).encode())
                 elif file_path in self.PERMITTED_PATHS:
                     try:
-                        file_contents = open(os.path.join(os.path.dirname(os.path.realpath(__file__)), file_path))
+                        file_contents = open(os.path.join(os.path.dirname(os.path.realpath(__file__)), file_path), 'rb')
                         self.send_response(200)
                         self.end_headers()
-                        self.wfile.write(file_contents.read().encode())
+                        self.wfile.write(file_contents.read())
                     except IOError:
                         self.send_response(404)
                         self.end_headers()
