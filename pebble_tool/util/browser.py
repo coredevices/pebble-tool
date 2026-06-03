@@ -35,7 +35,8 @@ class BrowserController(object):
             # so place the temporary file in the user's home directory.
             with tempfile.NamedTemporaryFile(dir=os.path.expanduser("~"),
                                              delete_on_close=False,
-                                             prefix="pebble-tool-emu-app-config-") as temp:
+                                             prefix="pebble-tool-emu-app-config-",
+                                             suffix=".html") as temp:
                 with open(temp.name, mode="w") as f:
                     f.write(f'<head><meta http-equiv="refresh" content="0;URL={url}"></head>')
                 tempfile_url = f"file://{temp.name}"
