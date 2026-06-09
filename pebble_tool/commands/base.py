@@ -92,7 +92,7 @@ class PebbleCommand(BaseCommand):
             group = parser
 
         for handler_impl in handlers:
-            handler_impl.add_argument_handler(group)
+            handler_impl.add_argument_handler(group, parser)
         return super(PebbleCommand, cls)._shared_parser() + [parser]
 
     @classmethod
@@ -174,9 +174,18 @@ class PebbleTransportConfiguration(with_metaclass(SelfRegisteringTransportConfig
         return cls.transport_class(*cls._connect_args(args))
 
     @classmethod
-    def add_argument_handler(cls):
-        """Note: this method must add at least one command directly to `cls`, not only a group,
-        because `cls` can be a mutually exclusive group (see PebbleCommand._shared_parser).
+    def add_argument_handler(cls, group, parser):
+        """Add this transport's arguments to the shared parser.
+
+        `group` is the (possibly mutually exclusive) group to which the primary
+        selecting argument must be added directly, so mutual exclusivity applies
+        (see PebbleCommand._shared_parser). At least one argument must be added
+        directly to `group`.
+
+        `parser` is the underlying parser; use it for any modifier arguments that
+        should NOT participate in mutual exclusivity (e.g. via an argument group).
+        argparse forbids nesting an argument group inside a mutually exclusive
+        group, so such sub-groups must be created on `parser`, not `group`.
         """
         raise NotImplementedError
 
@@ -191,8 +200,8 @@ class PebbleTransportSerial(PebbleTransportConfiguration):
     name = 'serial'
 
     @classmethod
-    def add_argument_handler(cls, parser):
-        parser.add_argument('--serial', type=str, help="Connected directly, given a path to a serial device.")
+    def add_argument_handler(cls, group, parser):
+        group.add_argument('--serial', type=str, help="Connected directly, given a path to a serial device.")
 
 
 class PebbleTransportPhone(PebbleTransportConfiguration):
@@ -220,8 +229,8 @@ class PebbleTransportPhone(PebbleTransportConfiguration):
         return cls.transport_class(*cls._connect_args(args))
 
     @classmethod
-    def add_argument_handler(cls, parser):
-        parser.add_argument('--phone', nargs='?', const=True, metavar='phone_ip',
+    def add_argument_handler(cls, group, parser):
+        group.add_argument('--phone', nargs='?', const=True, metavar='phone_ip',
                             help="Connect to your phone. If phone_ip is given, connect directly via "
                                  "WebSocket; otherwise, use the CloudPebble connection. "
                                  "Equivalent to PEBBLE_PHONE.")
@@ -281,11 +290,13 @@ class PebbleTransportQemu(PebbleTransportConfiguration):
             connection.send_packet(TimeMessage(message=SetUTC(unix_time=int(ts), utc_offset=tz_offset_minutes, tz_name=tz_name)))
 
     @classmethod
-    def add_argument_handler(cls, parser):
-        # Ungrouped to apply mutual exclusivity; see PebbleCommand._shared_parser()
-        parser.add_argument('--qemu', nargs='?', const='localhost:12344', metavar='host',
+    def add_argument_handler(cls, group, parser):
+        # Added directly to `group` to apply mutual exclusivity; see PebbleCommand._shared_parser()
+        group.add_argument('--qemu', nargs='?', const='localhost:12344', metavar='host',
                             help="Use this option to connect directly to a QEMU instance. "
                                  "Equivalent to PEBBLE_QEMU.")
+        # Modifier args: created on `parser` (not `group`) because argparse forbids
+        # nesting an argument group inside a mutually exclusive group.
         qemu_group = parser.add_argument_group()
         qemu_group.add_argument('--pypkjs', action='store_true',
                             help="When using --qemu, also spawn pypkjs. Requires --platform.")
@@ -302,8 +313,8 @@ class PebbleTransportCloudPebble(PebbleTransportConfiguration):
         return ()
 
     @classmethod
-    def add_argument_handler(cls, parser):
-        parser.add_argument('--cloudpebble', action='store_true',
+    def add_argument_handler(cls, group, parser):
+        group.add_argument('--cloudpebble', action='store_true',
                            help="Use this option to connect to your phone via"
                                 " the CloudPebble connection. Equivalent to "
                                 "PEBBLE_CLOUDPEBBLE.")
@@ -355,10 +366,12 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
             connection.send_packet(TimeMessage(message=SetUTC(unix_time=int(ts), utc_offset=tz_offset_minutes, tz_name=tz_name)))
 
     @classmethod
-    def add_argument_handler(cls, parser):
-        # Ungrouped to apply mutual exclusivity; see PebbleCommand._shared_parser()
-        parser.add_argument('--emulator', type=str, help="Launch an emulator. Equivalent to PEBBLE_EMULATOR.",
+    def add_argument_handler(cls, group, parser):
+        # Added directly to `group` to apply mutual exclusivity; see PebbleCommand._shared_parser()
+        group.add_argument('--emulator', type=str, help="Launch an emulator. Equivalent to PEBBLE_EMULATOR.",
                             choices=get_pebble_platforms())
+        # Modifier args: created on `parser` (not `group`) because argparse forbids
+        # nesting an argument group inside a mutually exclusive group.
         emu_group = parser.add_argument_group()
         emu_group.add_argument('--sdk', type=str, help="When using --emulator, SDK version to launch."
                                " Defaults to the active SDK (currently {})".format(sdk_version()))

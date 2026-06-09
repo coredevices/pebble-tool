@@ -14,16 +14,17 @@ jobs:
   test-cov:
     runs-on: ubuntu-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
       - name: Test Coverage
         run: |
-            uv run pytest
+            uv run --python ${{ matrix.python-version }} pytest
