@@ -1,7 +1,6 @@
 
 __author__ = 'cherie'
 
-import argparse
 import datetime
 import time
 
@@ -45,13 +44,18 @@ class EmuAccelCommand(PebbleCommand):
         super(EmuAccelCommand, self).__call__(args)
         if args.motion == 'custom' and args.file is not None:
             samples = []
-            for line in args.file:
-                line = line.strip()
-                if line:
-                    sample = []
-                    for x in line.split(','):
-                        sample.append(int(x))
-                    samples.append(QemuAccelSample(x=sample[0], y=sample[1], z=sample[2]))
+            try:
+                accel_file = open(args.file)
+            except OSError as e:
+                raise ToolError("Failed to open {}: {}".format(args.file, e))
+            with accel_file:
+                for line in accel_file:
+                    line = line.strip()
+                    if line:
+                        sample = []
+                        for x in line.split(','):
+                            sample.append(int(x))
+                        samples.append(QemuAccelSample(x=sample[0], y=sample[1], z=sample[2]))
         elif args.motion != 'custom':
             samples = {
                 'tilt-left': [QemuAccelSample(x=-500, y=0, z=-900),
@@ -93,7 +97,7 @@ class EmuAccelCommand(PebbleCommand):
                                      'custom'],
                             help="The type of accelerometer motion to send to the emulator. If using an accel file, "
                                  "specify 'custom' and then specify the filename using the '--file' option")
-        parser.add_argument('file', nargs='?', type=argparse.FileType('r'), default=None,
+        parser.add_argument('file', nargs='?', default=None,
                             help="Filename of the file containing custom accel data. Each line of this text file "
                                  "should contain the comma-separated x, y, and z readings. (e.g. '-24, -88, -1032')")
         return parser

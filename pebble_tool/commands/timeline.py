@@ -1,9 +1,9 @@
 
 __author__ = 'katharine'
 
-import argparse
 import datetime
 import json
+import sys
 import uuid
 
 from libpebble2.communication.transports.websocket import MessageTargetPhone, WebsocketTransport
@@ -36,9 +36,15 @@ class InsertPinCommand(PebbleCommand):
                 raise ToolError("You must either use this command from a pebble project or specify --app-uuid.")
 
         try:
-            pin = json.load(args.file)
+            if args.file == '-':
+                pin = json.load(sys.stdin)
+            else:
+                with open(args.file) as f:
+                    pin = json.load(f)
         except ValueError as e:
             raise ToolError("Failed to parse json: {}".format(e))
+        except OSError as e:
+            raise ToolError("Failed to open {}: {}".format(args.file, e))
 
         if pin_id is None:
             try:
@@ -73,7 +79,7 @@ class InsertPinCommand(PebbleCommand):
         parser.add_argument('--id', type=str, default=None, help='An arbitrary string representing an ID for the pin '
                                                                  'being added')
         parser.add_argument('--app-uuid', type=str, default=None, help="The UUID of the pin's parent app.")
-        parser.add_argument('file', type=argparse.FileType(), help='Filename to use for pin json. "-" means stdin.')
+        parser.add_argument('file', help='Filename to use for pin json. "-" means stdin.')
         return parser
 
 
