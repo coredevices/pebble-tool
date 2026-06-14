@@ -4,6 +4,7 @@ import contextlib
 import logging
 import os
 import socket
+import sys
 import tempfile
 import time
 from urllib.request import urlopen
@@ -28,7 +29,10 @@ class BrowserController(object):
         # where the config page should send submitted form data
         return_url = 'http://localhost:{}/close?'.format(port)
 
-        if url.startswith('file:'):
+        # NamedTemporaryFile's delete_on_close parameter is only available since python3.12
+        is_tempfile_delete_on_close_available = sys.version_info >= (3, 12)
+
+        if url.startswith('file:') or not is_tempfile_delete_on_close_available:
             # TODO: several browsers strip searchParams when opening local file URLs, so this may not work
             url = self.url_append_params(url, {'return_to': return_url})
 
