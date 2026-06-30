@@ -13,6 +13,7 @@ from libpebble2.communication.transports.qemu import MessageTargetQemu, QemuTran
 from libpebble2.protocol.system import TimeMessage, SetUTC
 import math
 import os
+import struct
 
 from .base import PebbleCommand
 from ..exceptions import ToolError
@@ -457,4 +458,182 @@ class EmuButtonCommand(PebbleCommand):
                             help="Number of times to repeat (default: 1)")
         parser.add_argument('--interval', '-i', type=int, default=200,
                             help="Interval in ms between repeats (default: 200)")
+        return parser
+
+
+# Health value injection (QEMU health protocols). These protocols are not part of
+# libpebble2's QemuPacket union, so the payloads are framed and sent with an explicit
+# protocol id rather than via send_data_to_qemu().
+
+# QEMU protocol ids (must match src/fw/drivers/qemu/qemu_serial.h)
+QEMU_PROTOCOL_HEALTH_METRIC = 12
+QEMU_PROTOCOL_HEART_RATE = 13
+
+# QemuHealthMetric ids (must match QemuHealthMetric in qemu_serial.h)
+HEALTH_METRIC_STEPS = 0
+HEALTH_METRIC_ACTIVE_SECONDS = 1
+HEALTH_METRIC_RESTING_CALORIES = 2
+HEALTH_METRIC_ACTIVE_CALORIES = 3
+HEALTH_METRIC_DISTANCE_METERS = 4
+HEALTH_METRIC_SLEEP_TOTAL_SECONDS = 5
+HEALTH_METRIC_SLEEP_RESTFUL_SECONDS = 6
+
+# HRMQuality values (must match HRMQuality in include/pbl/services/hrm/hrm_manager.h)
+HRM_QUALITY = {
+    'off-wrist': -1,
+    'worst': 0,
+    'poor': 1,
+    'acceptable': 2,
+    'good': 3,
+    'excellent': 4,
+}
+
+
+def send_raw_to_qemu(transport, protocol, payload):
+    """Send a pre-serialised QEMU payload using an explicit protocol id.
+
+    Used for QEMU protocols that aren't registered in libpebble2's QemuPacket union.
+    """
+    try:
+        if isinstance(transport, WebsocketTransport):
+            transport.send_packet(WebSocketRelayQemu(protocol=protocol, data=payload),
+                                  target=MessageTargetPhone())
+        elif isinstance(transport, QemuTransport):
+            transport.send_packet(payload, target=MessageTargetQemu(protocol=protocol, raw=True))
+        else:
+            raise ToolError("This command can only be run with an emulator.")
+    except IOError as e:
+        raise ToolError(str(e))
+
+
+def send_health_metric(transport, metric_id, value):
+    # QemuProtocolHealthMetricHeader: uint8_t metric; int32_t value (big-endian)
+    try:
+        payload = struct.pack('>Bi', metric_id, int(value))
+    except struct.error:
+        raise ToolError("Value {} is out of range (must fit in a signed 32-bit integer)".format(value))
+    send_raw_to_qemu(transport, QEMU_PROTOCOL_HEALTH_METRIC, payload)
+
+
+class EmuStepsCommand(PebbleCommand):
+    """Sets the step count for the current day in the emulator."""
+    command = 'emu-steps'
+    valid_connections = {'qemu', 'emulator'}
+
+    def __call__(self, args):
+        super(EmuStepsCommand, self).__call__(args)
+        if args.count < 0:
+            raise ToolError("Step count must not be negative.")
+        send_health_metric(self.pebble.transport, HEALTH_METRIC_STEPS, args.count)
+
+    @classmethod
+    def add_parser(cls, parser):
+        parser = super(EmuStepsCommand, cls).add_parser(parser)
+        parser.add_argument('count', type=int, help="Step count to set for the current day")
+        return parser
+
+
+class EmuDistanceCommand(PebbleCommand):
+    """Sets the distance walked (meters) for the current day in the emulator."""
+    command = 'emu-distance'
+    valid_connections = {'qemu', 'emulator'}
+
+    def __call__(self, args):
+        super(EmuDistanceCommand, self).__call__(args)
+        if args.meters < 0:
+            raise ToolError("Distance must not be negative.")
+        send_health_metric(self.pebble.transport, HEALTH_METRIC_DISTANCE_METERS, args.meters)
+
+    @classmethod
+    def add_parser(cls, parser):
+        parser = super(EmuDistanceCommand, cls).add_parser(parser)
+        parser.add_argument('meters', type=int, help="Distance in meters to set for the current day")
+        return parser
+
+
+class EmuCaloriesCommand(PebbleCommand):
+    """Sets the active (and optionally resting) calories for the current day in the emulator."""
+    command = 'emu-calories'
+    valid_connections = {'qemu', 'emulator'}
+
+    def __call__(self, args):
+        super(EmuCaloriesCommand, self).__call__(args)
+        if args.active < 0 or (args.resting is not None and args.resting < 0):
+            raise ToolError("Calories must not be negative.")
+        send_health_metric(self.pebble.transport, HEALTH_METRIC_ACTIVE_CALORIES, args.active)
+        if args.resting is not None:
+            send_health_metric(self.pebble.transport, HEALTH_METRIC_RESTING_CALORIES, args.resting)
+
+    @classmethod
+    def add_parser(cls, parser):
+        parser = super(EmuCaloriesCommand, cls).add_parser(parser)
+        parser.add_argument('active', type=int, help="Active calories (kcal) for the current day")
+        parser.add_argument('--resting', type=int, default=None,
+                            help="Resting calories (kcal) for the current day")
+        return parser
+
+
+class EmuActiveTimeCommand(PebbleCommand):
+    """Sets the active time (minutes) for the current day in the emulator."""
+    command = 'emu-active-time'
+    valid_connections = {'qemu', 'emulator'}
+
+    def __call__(self, args):
+        super(EmuActiveTimeCommand, self).__call__(args)
+        if args.minutes < 0:
+            raise ToolError("Active time must not be negative.")
+        # The firmware metric is in seconds; the user provides minutes.
+        send_health_metric(self.pebble.transport, HEALTH_METRIC_ACTIVE_SECONDS, args.minutes * 60)
+
+    @classmethod
+    def add_parser(cls, parser):
+        parser = super(EmuActiveTimeCommand, cls).add_parser(parser)
+        parser.add_argument('minutes', type=int, help="Active time in minutes for the current day")
+        return parser
+
+
+class EmuSleepCommand(PebbleCommand):
+    """Sets the total (and optionally restful) sleep minutes for the current day in the emulator."""
+    command = 'emu-sleep'
+    valid_connections = {'qemu', 'emulator'}
+
+    def __call__(self, args):
+        super(EmuSleepCommand, self).__call__(args)
+        if args.total < 0 or (args.restful is not None and args.restful < 0):
+            raise ToolError("Sleep duration must not be negative.")
+        # The firmware metric is in seconds; the user provides minutes.
+        send_health_metric(self.pebble.transport, HEALTH_METRIC_SLEEP_TOTAL_SECONDS, args.total * 60)
+        if args.restful is not None:
+            send_health_metric(self.pebble.transport, HEALTH_METRIC_SLEEP_RESTFUL_SECONDS,
+                               args.restful * 60)
+
+    @classmethod
+    def add_parser(cls, parser):
+        parser = super(EmuSleepCommand, cls).add_parser(parser)
+        parser.add_argument('total', type=int, help="Total sleep duration in minutes")
+        parser.add_argument('--restful', type=int, default=None,
+                            help="Restful (deep) sleep duration in minutes")
+        return parser
+
+
+class EmuHeartRateCommand(PebbleCommand):
+    """Injects a heart rate reading into the emulator (emery board only)."""
+    command = 'emu-heart-rate'
+    valid_connections = {'qemu', 'emulator'}
+
+    def __call__(self, args):
+        super(EmuHeartRateCommand, self).__call__(args)
+        if not 0 <= args.bpm <= 255:
+            raise ToolError("Heart rate (bpm) must be between 0 and 255.")
+        quality = HRM_QUALITY[args.quality]
+        # QemuProtocolHeartRateHeader: uint8_t bpm; int8_t quality
+        payload = struct.pack('>Bb', args.bpm, quality)
+        send_raw_to_qemu(self.pebble.transport, QEMU_PROTOCOL_HEART_RATE, payload)
+
+    @classmethod
+    def add_parser(cls, parser):
+        parser = super(EmuHeartRateCommand, cls).add_parser(parser)
+        parser.add_argument('bpm', type=int, help="Heart rate in beats per minute")
+        parser.add_argument('--quality', choices=sorted(HRM_QUALITY.keys()), default='excellent',
+                            help="Signal quality of the reading (default: excellent)")
         return parser
