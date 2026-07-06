@@ -169,6 +169,7 @@ class PublishCommand(BaseCommand):
             if app_id:
                 self._ok("Resolved existing appstore app ID: {}".format(app_id))
                 gif_paths, screenshot_paths = self._collect_screenshot_assets(args, pbw_metadata, allow_skip=True)
+                self._gate_replace_screenshots(args, gif_paths, screenshot_paths)
                 self._step("Publishing release to Pebble Appstore...")
                 response_payload = self._upload_release(
                     api_base=args.api_base,
@@ -180,6 +181,7 @@ class PublishCommand(BaseCommand):
                     is_published=args.is_published,
                     gif_paths=gif_paths,
                     screenshot_paths=screenshot_paths,
+                    replace_screenshots=getattr(args, "replace_screenshots", False),
                 )
                 resolved_app_id = app_id
             else:
@@ -505,6 +507,26 @@ class PublishCommand(BaseCommand):
         error_text = (payload.get("error") or response.text or "").lower()
         return "screenshot" in error_text
 
+    def _gate_replace_screenshots(self, args, gif_paths, screenshot_paths):
+        # Guard + destructive-action confirmation for --replace-screenshots.
+        # Replacement is irreversible via the CLI, so fail closed when there is
+        # nothing to upload and require explicit confirmation on an interactive TTY.
+        if not getattr(args, "replace_screenshots", False):
+            return
+        if not (gif_paths or screenshot_paths):
+            raise ToolError("--replace-screenshots requires screenshots to upload")
+        count = len(gif_paths) + len(screenshot_paths)
+        if getattr(args, "non_interactive", False):
+            # In --non-interactive (CI) mode the flag itself is the consent.
+            return
+        self._warn(
+            "About to REPLACE the app's existing screenshots with {} uploaded file(s). "
+            "This cannot be undone via the CLI.".format(count)
+        )
+        answer = input("Replace existing screenshots? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            raise ToolError("Aborted: screenshot replacement not confirmed.")
+
     @classmethod
     def _upload_release(
         cls,
@@ -517,13 +539,14 @@ class PublishCommand(BaseCommand):
         is_published,
         gif_paths,
         screenshot_paths,
+        replace_screenshots=False,
     ):
         url = "{}/api/dashboard/apps/{}/releases".format(api_base.rstrip("/"), app_id)
         form_data = {
             "version": version,
             "releaseNotes": release_notes or "",
             "isPublished": "true",
-            "replaceScreenshots": "false",
+            "replaceScreenshots": "true" if replace_screenshots else "false",
         }
 
         files_payload = []
@@ -586,6 +609,7 @@ class PublishCommand(BaseCommand):
                     release_notes=release_notes,
                     is_published=is_published,
                     gif_paths=[], screenshot_paths=[],
+                    replace_screenshots=False,
                 )
             raise ToolError(
                 "Release upload failed ({}): {}".format(
@@ -993,4 +1017,8 @@ class PublishCommand(BaseCommand):
         parser.add_argument("--screenshots", nargs="+", default=None, metavar="FILE",
                             help="Local screenshot/GIF files to upload in --non-interactive mode. "
                                  "Filenames must start with the platform name, e.g. emery_screenshot.png.")
+        parser.add_argument("--replace-screenshots", action="store_true", default=False,
+                            help="Replace the app's existing screenshots with the uploaded ones "
+                                 "instead of appending (existing apps only). Irreversible via the "
+                                 "CLI; prompts for confirmation unless --non-interactive.")
         return parser
