@@ -201,3 +201,113 @@ def test_collect_new_app_details_non_interactive_requires_description():
             {"app_name": "App", "version": "1.0", "app_type": "watchapp"},
             {},
         )
+
+
+# --- Feature A: --replace-screenshots (#79) ---
+
+
+def test_publish_parser_has_replace_screenshots_default_false():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers()
+    PublishCommand.add_parser(subparsers)
+    ns = parser.parse_args(["publish"])
+    assert ns.replace_screenshots is False
+
+
+def test_upload_release_sends_replace_screenshots_false_by_default(monkeypatch, tmp_path):
+    pbw = tmp_path / "app.pbw"
+    pbw.write_bytes(b"pbw")
+    shot = tmp_path / "emery_1.png"
+    shot.write_bytes(b"img")
+
+    captured = {}
+
+    def fake_post(cls, url, headers, data, files, timeout, label):
+        captured["data"] = dict(data)
+        return _FakeResponse({"message": "ok"}, status_code=200)
+
+    monkeypatch.setattr(PublishCommand, "_post_with_wait_bar", classmethod(fake_post))
+
+    PublishCommand._upload_release(
+        api_base="http://localhost:3000",
+        app_id="app_1",
+        firebase_id_token="tok",
+        pbw_path=str(pbw),
+        version="1.0",
+        release_notes="",
+        is_published=False,
+        gif_paths=[],
+        screenshot_paths=[str(shot)],
+    )
+    assert captured["data"]["replaceScreenshots"] == "false"
+
+
+def test_upload_release_sends_replace_screenshots_true_when_flag_set(monkeypatch, tmp_path):
+    pbw = tmp_path / "app.pbw"
+    pbw.write_bytes(b"pbw")
+    shot = tmp_path / "emery_1.png"
+    shot.write_bytes(b"img")
+
+    captured = {}
+
+    def fake_post(cls, url, headers, data, files, timeout, label):
+        captured["data"] = dict(data)
+        return _FakeResponse({"message": "ok"}, status_code=200)
+
+    monkeypatch.setattr(PublishCommand, "_post_with_wait_bar", classmethod(fake_post))
+
+    PublishCommand._upload_release(
+        api_base="http://localhost:3000",
+        app_id="app_1",
+        firebase_id_token="tok",
+        pbw_path=str(pbw),
+        version="1.0",
+        release_notes="",
+        is_published=False,
+        gif_paths=[],
+        screenshot_paths=[str(shot)],
+        replace_screenshots=True,
+    )
+    assert captured["data"]["replaceScreenshots"] == "true"
+
+
+def test_replace_screenshots_without_screenshots_raises():
+    args = Namespace(replace_screenshots=True, non_interactive=True)
+    cmd = PublishCommand()
+    with pytest.raises(ToolError, match="requires screenshots"):
+        cmd._gate_replace_screenshots(args, [], [])
+
+
+def test_screenshot_retry_path_never_sends_replace_true(monkeypatch, tmp_path):
+    pbw = tmp_path / "app.pbw"
+    pbw.write_bytes(b"pbw")
+    shot = tmp_path / "emery_1.png"
+    shot.write_bytes(b"img")
+
+    calls = []
+
+    def fake_post(cls, url, headers, data, files, timeout, label):
+        calls.append(dict(data))
+        if len(calls) == 1:
+            return _FakeResponse({"error": "invalid screenshot"}, status_code=400)
+        return _FakeResponse({"message": "ok"}, status_code=200)
+
+    monkeypatch.setattr(PublishCommand, "_post_with_wait_bar", classmethod(fake_post))
+
+    PublishCommand._upload_release(
+        api_base="http://localhost:3000",
+        app_id="app_1",
+        firebase_id_token="tok",
+        pbw_path=str(pbw),
+        version="1.0",
+        release_notes="",
+        is_published=False,
+        gif_paths=[],
+        screenshot_paths=[str(shot)],
+        replace_screenshots=True,
+    )
+    assert len(calls) == 2
+    assert calls[0]["replaceScreenshots"] == "true"
+    assert calls[1]["replaceScreenshots"] == "false"
