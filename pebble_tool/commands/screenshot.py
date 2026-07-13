@@ -11,7 +11,6 @@ import png
 import os.path
 import re
 import socket
-import threading
 from progressbar import ProgressBar, Bar, ReverseBar, FileTransferSpeed, Timer, Percentage
 import signal
 import subprocess
@@ -179,37 +178,29 @@ class ScreenshotCommand(PebbleCommand):
         if not monitor_port:
             raise ToolError("QEMU monitor port not available; cannot capture GIF.")
 
-        # Start the backlight keepalive *before* the minute-boundary wait so
-        # the screen is already lit by the time we start recording. The Pebble
-        # backlight times out after a few seconds, so a single tap up front
-        # would go dark again during the up-to-60s wait.
-        stop_keepalive = threading.Event()
-
-        def backlight_keepalive():
-            while not stop_keepalive.wait(1.0):
-                self._qemu_monitor_command(monitor_port, "sendkey left")
-
-        # Initial tap so the backlight is on right now; the keepalive thread
-        # then refreshes it every second.
-        self._qemu_monitor_command(monitor_port, "sendkey left")
-        keepalive_thread = threading.Thread(target=backlight_keepalive, daemon=True)
-        keepalive_thread.start()
+        # Do NOT inject any input to keep the backlight on. The old approach
+        # ("sendkey left" every second) presses the BACK button, which
+        # watchfaces ignore but watchapps act on — a BACK press per second
+        # exits any watchapp before the GIF can be captured, and no button
+        # is semantically safe for an arbitrary app (up/down/select all do
+        # things). QemuTap does not trigger tap-to-light in the emulator
+        # firmware. Instead we deliberately record the UNLIT panel — a flat
+        # ~39% brightness scale — and normalize brightness in the ffmpeg
+        # pass below, which is lossless and identical for faces and apps.
 
         # Wait so the recording window straddles the next minute boundary,
-        # putting the rollover ~3 s into the 7 s clip.
+        # putting the rollover ~3 s into the 7 s clip. Enforce a minimum
+        # wait so any backlight lit by the install has fully timed out and
+        # every frame is uniformly unlit.
         pre_rollover = 3.0
+        min_wait = 8.0
         now = time.time()
         wait_seconds = (60 - (now % 60)) - pre_rollover
-        if wait_seconds < 0:
+        if wait_seconds < min_wait:
             wait_seconds += 60
         print("Waiting {:.1f}s for next minute boundary, then capturing {}s...".format(
             wait_seconds, duration_seconds))
         time.sleep(wait_seconds)
-
-        # Refresh the backlight one more time and give it a moment to settle
-        # in the framebuffer before the first frame is dumped.
-        self._qemu_monitor_command(monitor_port, "sendkey left")
-        time.sleep(0.3)
 
         temp_dir = tempfile.mkdtemp(prefix="pebble-gif-")
         frame_paths = []
@@ -243,9 +234,6 @@ class ScreenshotCommand(PebbleCommand):
                 next_capture += frame_interval
                 frame_index += 1
 
-            stop_keepalive.set()
-            keepalive_thread.join(timeout=3.0)
-
             if not frame_paths:
                 raise ToolError("No frames captured for GIF.")
 
@@ -262,24 +250,38 @@ class ScreenshotCommand(PebbleCommand):
             if output_dir:
                 os.makedirs(output_dir, exist_ok=True)
 
+            # The panel was recorded unlit (see note above): a flat linear
+            # brightness scale. Measure the actual peak and normalize back
+            # to full brightness in the ffmpeg pass. Skip if frames are
+            # already (near-)fully lit.
+            peak = 0
+            for idx in range(0, len(frame_paths), max(1, len(frame_paths) // 8)):
+                p = os.path.join(seq_dir, "frame_{:05d}.ppm".format(idx))
+                img = Image.open(p).convert("RGB")
+                peak = max(peak, max(e[1] for e in img.getextrema()))
+                img.close()
+            if 0 < peak < 250:
+                gain = 'lutrgb=r=clip(val*255/{0}\\,0\\,255):g=clip(val*255/{0}\\,0\\,255):b=clip(val*255/{0}\\,0\\,255),'.format(peak)
+            else:
+                gain = ''
+
             print("Processing {} frames into GIF...".format(len(frame_paths)))
             palette = os.path.join(temp_dir, "palette.png")
             self._run_ffmpeg([
                 'ffmpeg', '-framerate', str(target_fps), '-i', seq_pattern,
-                '-vf', 'palettegen=max_colors=64:reserve_transparent=0',
+                '-vf', '{}palettegen=max_colors=64:reserve_transparent=0'.format(gain),
                 '-y', palette, '-v', 'error',
             ], "Palette generation")
 
             self._run_ffmpeg([
                 'ffmpeg', '-framerate', str(target_fps), '-i', seq_pattern,
                 '-i', palette,
-                '-filter_complex', '[0:v]mpdecimate[v];[v][1:v]paletteuse=dither=none',
+                '-filter_complex', '[0:v]{}mpdecimate[v];[v][1:v]paletteuse=dither=none'.format(gain),
                 '-y', filename, '-v', 'error',
             ], "GIF encoding")
 
             print("Saved rollover GIF to {}".format(filename))
         finally:
-            stop_keepalive.set()
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def _capture_gif_all_platforms(self, args):
