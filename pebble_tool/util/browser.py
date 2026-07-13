@@ -4,8 +4,10 @@ import contextlib
 import logging
 import os
 import socket
+import sys
 import tempfile
 import time
+from urllib.request import urlopen
 import webbrowser
 
 import pyqrcode
@@ -23,24 +25,49 @@ class BrowserController(object):
 
     def open_config_page(self, url, callback):
         self.port = port = self._choose_port()
-        url = self.url_append_params(url, {'return_to': 'http://localhost:{}/close?'.format(port)})
 
-        if url.startswith('file'):
+        # where the config page should send submitted form data
+        return_url = 'http://localhost:{}/close?'.format(port)
+
+        # NamedTemporaryFile's delete_on_close parameter is only available since python3.12
+        is_tempfile_delete_on_close_available = sys.version_info >= (3, 12)
+
+        if url.startswith('file:') or not is_tempfile_delete_on_close_available:
+            # TODO: several browsers strip searchParams when opening local file URLs, so this may not work
+            url = self.url_append_params(url, {'return_to': return_url})
+
             webbrowser.open_new(url)
             self.serve_page(port, callback)
         else:
-            # The URL argument length limit can quickly be exceeded by a Clay config page
-            # so instead of providing the URL directly, write it to a temporary file.
+            # Firefox's URL argument length limit can quickly be exceeded by a Clay config URL
+            # and many browsers have trouble directly opening data URIs for a fully local config page.
+            # So instead of opening the URL directly, write it to a temporary file.
             # Default Ubuntu firefox installation can't access /tmp
             # so place the temporary file in the user's home directory.
             with tempfile.NamedTemporaryFile(dir=os.path.expanduser("~"),
                                              delete_on_close=False,
                                              prefix="pebble-tool-emu-app-config-",
                                              suffix=".html") as temp:
-                with open(temp.name, mode="w") as f:
-                    f.write(f'<head><meta http-equiv="refresh" content="0;URL={url}"></head>')
-                tempfile_url = f"file://{temp.name}"
 
+                if url.startswith('data:'):  # a data URI encoding the config page's HTML
+                    # decode the data URI and write the resulting HTML
+                    with urlopen(url) as response:
+                        data = response.read()
+                        # several browsers strip searchParams when opening local file URLs
+                        # so append to the HTML a script to self-refresh with added searchParam
+                        data += (f'<script>if(!location.search){{location.search="?return_to={return_url}"}}</script>'
+                                 .encode("utf-8"))
+                        with open(temp.name, mode="wb") as f:
+                            f.write(data)
+
+                else:  # an HTTP URL. This is the path that web-hosted and Clay configs take.
+                    # several browsers strip searchParams when opening local file URLs
+                    # so write an HTML page which self-refreshes into the url with added searchParam
+                    url = self.url_append_params(url, {'return_to': return_url})
+                    with open(temp.name, mode="w") as f:
+                        f.write(f'<head><meta http-equiv="refresh" content="0;URL={url}"></head>')
+
+                tempfile_url = f"file://{temp.name}"
                 webbrowser.open_new(tempfile_url)
                 self.serve_page(port, callback)
 
