@@ -185,8 +185,8 @@ class ScreenshotCommand(PebbleCommand):
         # is semantically safe for an arbitrary app (up/down/select all do
         # things). QemuTap does not trigger tap-to-light in the emulator
         # firmware. Instead we deliberately record the UNLIT panel — a flat
-        # ~39% brightness scale — and normalize brightness in the ffmpeg
-        # pass below, which is lossless and identical for faces and apps.
+        # per-platform brightness scale — and normalize brightness in the
+        # ffmpeg pass below, which is lossless and identical for faces and apps.
 
         # Wait so the recording window straddles the next minute boundary,
         # putting the rollover ~3 s into the 7 s clip. Enforce a minimum
@@ -250,18 +250,31 @@ class ScreenshotCommand(PebbleCommand):
             if output_dir:
                 os.makedirs(output_dir, exist_ok=True)
 
-            # The panel was recorded unlit (see note above): a flat linear
-            # brightness scale. Measure the actual peak and normalize back
-            # to full brightness in the ffmpeg pass. Skip if frames are
-            # already (near-)fully lit.
-            peak = 0
-            for idx in range(0, len(frame_paths), max(1, len(frame_paths) // 8)):
-                p = os.path.join(seq_dir, "frame_{:05d}.ppm".format(idx))
-                img = Image.open(p).convert("RGB")
-                peak = max(peak, max(e[1] for e in img.getextrema()))
-                img.close()
-            if 0 < peak < 250:
-                gain = 'lutrgb=r=clip(val*255/{0}\\,0\\,255):g=clip(val*255/{0}\\,0\\,255):b=clip(val*255/{0}\\,0\\,255),'.format(peak)
+            # The panel was recorded unlit (see note above): with the backlight
+            # off the emulator scales the lit channel values {85, 170, 255} down
+            # to a per-platform unlit set (measured from QEMU screendumps of the
+            # same screen lit vs backlight timed out). The two sets are disjoint,
+            # so mapping unlit values back to lit is exact AND identity on lit
+            # pixels: every frame is corrected independently, and frames where
+            # the backlight happened to be on (e.g. apps calling
+            # light_enable(true), or a mid-clip backlight change) pass through
+            # untouched -- no guessing from content brightness.
+            # Basalt and chalk get no correction and stay dim
+            # rather than risk corrupted colours: basalt's legacy renderer puts
+            # unlit 170 one step from lit 169, and chalk renders continuous
+            # antialiased values, so no safe exact mapping exists for either.
+            unlit_to_lit = {
+                'aplite': {170: 254},
+                'diorite': {170: 226},
+                'emery': {33: 85, 66: 170, 100: 255},
+                'flint': {180: 255},
+                'gabbro': {60: 85, 120: 170, 180: 255},
+            }.get(self.pebble.watch_platform)
+            if unlit_to_lit:
+                expr = 'val'
+                for unlit, lit in unlit_to_lit.items():
+                    expr = 'if(eq(val\\,{0})\\,{1}\\,{2})'.format(unlit, lit, expr)
+                gain = 'lutrgb=r={0}:g={0}:b={0},'.format(expr)
             else:
                 gain = ''
 
