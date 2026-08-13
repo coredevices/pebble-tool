@@ -18,6 +18,7 @@ from pebble_tool.exceptions import ToolError
 from pebble_tool.sdk import get_pebble_platforms, sdk_version
 from pebble_tool.sdk.emulator import ManagedEmulatorTransport, ExternalQemuTransport, get_all_emulator_info
 from pebble_tool.sdk.cloudpebble import CloudPebbleTransport
+from pebble_tool.util import adb
 from pebble_tool.util.analytics import post_event
 
 _CommandRegistry = []
@@ -234,6 +235,30 @@ class PebbleTransportPhone(PebbleTransportConfiguration):
                             help="Connect to your phone. If phone_ip is given, connect directly via "
                                  "WebSocket; otherwise, use the CloudPebble connection. "
                                  "Equivalent to PEBBLE_PHONE.")
+
+
+class PebbleTransportAdb(PebbleTransportConfiguration):
+    transport_class = WebsocketTransport
+    name = 'adb'
+
+    @classmethod
+    def _connect_args(cls, args):
+        serial = getattr(args, cls.name, None) or cls._config_env_var()
+        # PEBBLE_ADB is usually set to a flag-like value just to opt in, rather than to a serial.
+        if serial is True or str(serial).lower() in ('1', 'true', 'yes'):
+            device = []
+        else:
+            device = ['-s', serial]
+        local_port = adb.forward(device, adb.start_dev_connection(device))
+        return ("ws://127.0.0.1:{}/".format(local_port),)
+
+    @classmethod
+    def add_argument_handler(cls, group, parser):
+        group.add_argument('--adb', nargs='?', const=True, metavar='device_serial',
+                           help="Connect to the Pebble app on an Android device over adb, "
+                                "starting its developer connection for you. device_serial "
+                                "picks a device if several are attached. "
+                                "Equivalent to PEBBLE_ADB.")
 
 
 class PebbleTransportQemu(PebbleTransportConfiguration):

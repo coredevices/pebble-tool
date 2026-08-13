@@ -10,7 +10,7 @@ from ..sdk.project import PebbleProject
 class SendAppMessageCommand(PebbleCommand):
     """Sends an App Message key-value dictionary to the running watchapp."""
     command = 'send-app-message'
-    valid_connections = {'emulator', 'qemu', 'phone', 'serial', 'cloudpebble'}
+    valid_connections = {'emulator', 'qemu', 'phone', 'serial', 'cloudpebble', 'adb'}
 
     @classmethod
     def _parse_key_value(cls, entry, flag_name):
