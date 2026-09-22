@@ -112,10 +112,11 @@ def update_emulator_info(platform, version, new_content):
 
 
 class ManagedEmulatorTransport(WebsocketTransport):
-    def __init__(self, platform, version=None, vnc_enabled=False):
+    def __init__(self, platform, version=None, vnc_enabled=False, sunlight_enabled=False):
         self.platform = platform
         self.version = version
         self.vnc_enabled = vnc_enabled
+        self.sunlight_enabled = sunlight_enabled
         self.websockify_pid = None
         self._find_ports()
         super(ManagedEmulatorTransport, self).__init__('ws://localhost:{}/'.format(self.pypkjs_port))
@@ -138,7 +139,9 @@ class ManagedEmulatorTransport(WebsocketTransport):
         if info is not None:
             self.version = info['version']
             existing_vnc = info['qemu'].get('vnc', False)
-            if self._is_pid_running(info['qemu']['pid']) and existing_vnc == self.vnc_enabled:
+            existing_sunlight = info['qemu'].get('sunlight', False)
+            if (self._is_pid_running(info['qemu']['pid']) and existing_vnc == self.vnc_enabled and
+                    existing_sunlight == self.sunlight_enabled):
                 qemu_running = True
                 self.qemu_port = info['qemu']['port']
                 self.qemu_serial_port = info['qemu']['serial']
@@ -154,9 +157,13 @@ class ManagedEmulatorTransport(WebsocketTransport):
                     qemu_running = False
                     self.qemu_pid = None
             else:
-                # Kill existing QEMU if VNC state doesn't match
-                if self._is_pid_running(info['qemu']['pid']) and existing_vnc != self.vnc_enabled:
-                    logger.info("Killing existing QEMU because VNC state changed (was %s, now %s)", existing_vnc, self.vnc_enabled)
+                # Kill existing QEMU if VNC or sunlight state doesn't match
+                if (self._is_pid_running(info['qemu']['pid']) and
+                        (existing_vnc != self.vnc_enabled or
+                         existing_sunlight != self.sunlight_enabled)):
+                    logger.info("Killing existing QEMU because VNC/sunlight state changed "
+                                "(was vnc=%s sunlight=%s, now vnc=%s sunlight=%s)",
+                                existing_vnc, existing_sunlight, self.vnc_enabled, self.sunlight_enabled)
                     os.kill(info['qemu']['pid'], signal.SIGKILL)
                     # Also kill pypkjs since it depends on QEMU
                     if self._is_pid_running(info['pypkjs']['pid']):
@@ -251,6 +258,21 @@ class ManagedEmulatorTransport(WebsocketTransport):
 
         self._save_state()
 
+    @staticmethod
+    def _sunlight_device_globals(platform, use_new_boards):
+        """QEMU -global args enabling sunlight mode for a platform's display."""
+        if platform in ('basalt', 'chalk'):
+            return ['-global', 'pebble-snowy-display.sunlight=true']
+        elif platform in ('emery', 'gabbro'):
+            if use_new_boards:
+                return ['-global', 'pebble-display.sunlight=true']
+            else:
+                return ['-global', 'pebble-snowy-display.sunlight=true']
+        elif platform == 'flint' and use_new_boards:
+            return ['-global', 'pebble-display.sunlight=true']
+        else:
+            return []
+
     def _save_state(self):
         d = {
             'qemu': {
@@ -260,6 +282,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
                 'gdb': self.qemu_gdb_port,
                 'monitor': self.qemu_monitor_port,
                 'vnc': self.vnc_enabled,
+                'sunlight': self.sunlight_enabled,
             },
             'pypkjs': {
                 'pid': self.pypkjs_pid,
@@ -395,6 +418,9 @@ class ManagedEmulatorTransport(WebsocketTransport):
         }
 
         command.extend(platform_args[self.platform])
+
+        if self.sunlight_enabled:
+            command.extend(self._sunlight_device_globals(self.platform, use_new_boards))
 
         if new_qemu and not self.vnc_enabled:
             display_type = 'sdl'

@@ -303,7 +303,8 @@ class ScreenshotCommand(PebbleCommand):
                 persist_dir = get_sdk_persist_dir(platform_name, target_sdk)
                 if os.path.exists(persist_dir):
                     shutil.rmtree(persist_dir)
-                pebble = self._connect_emulator(platform_name, args.sdk, vnc_enabled=False)
+                pebble = self._connect_emulator(platform_name, args.sdk, vnc_enabled=False,
+                                                sunlight_enabled=getattr(args, 'sunlight', False))
                 self.pebble = pebble
                 # pypkjs accepts the WebSocket connect immediately but isn't yet
                 # ready to relay an install bundle to a freshly-booted watch.
@@ -340,7 +341,8 @@ class ScreenshotCommand(PebbleCommand):
             pebble = None
             previous_pebble = getattr(self, "pebble", None)
             try:
-                pebble = self._connect_emulator(platform_name, args.sdk)
+                pebble = self._connect_emulator(platform_name, args.sdk,
+                                                sunlight_enabled=getattr(args, 'sunlight', False))
                 self.pebble = pebble
                 ToolAppInstaller(pebble, pbw_path).install()
                 self._set_time_1010(pebble)
@@ -355,8 +357,8 @@ class ScreenshotCommand(PebbleCommand):
                 self._shutdown_platform_emulator(platform_name, args.sdk)
         return captured_files
 
-    def _connect_emulator(self, platform_name, sdk_version, vnc_enabled=False):
-        transport = ManagedEmulatorTransport(platform_name, sdk_version, vnc_enabled)
+    def _connect_emulator(self, platform_name, sdk_version, vnc_enabled=False, sunlight_enabled=False):
+        transport = ManagedEmulatorTransport(platform_name, sdk_version, vnc_enabled, sunlight_enabled)
         pebble = PebbleConnection(transport, **self._get_debug_args())
         pebble.connect()
         pebble.run_async()
