@@ -43,12 +43,13 @@ After every change, build, install, look at the result and read the logs. Do not
 
 ```bash
 pebble build
-pebble install --emulator emery
+pebble install --emulator emery --logs   # streams APP_LOG output; Ctrl-C once the app is up
 pebble screenshot --scale 6 --no-open screenshot.png   # then view screenshot.png
 pebble emu-button click select                          # drive the app
 pebble screenshot --scale 6 --no-open screenshot.png   # check the new state
-pebble logs --emulator emery                            # APP_LOG output and crashes
 ```
+
+`pebble logs --emulator emery` streams until Ctrl-C, so run it in a second terminal or in the background while you interact with the app, and stop it before moving on.
 
 Repeat with `--emulator <platform>` for each platform in `targetPlatforms` in package.json. Round displays (chalk, gabbro) and the smaller aplite/diorite screens need their own check.
 
