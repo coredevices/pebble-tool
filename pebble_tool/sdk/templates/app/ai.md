@@ -15,6 +15,9 @@ The app targets multiple Pebble watch models:
 - diorite (Pebble 2)
 - emery (Pebble Time 2)
 - flint (Pebble 2 Duo)
+- gabbro (Pebble Round 2)
+
+Alloy (embedded JavaScript) projects run on emery and gabbro only.
 
 ## Commands
 
@@ -33,6 +36,21 @@ pebble screenshot --scale 6 --no-open screenshot.png
 ```
 
 If you need more information on the `pebble` command or a sub-command, append `--help`.
+
+## Verify your work
+
+After every change, build, install, look at the result and read the logs. Do not stop at a successful build.
+
+```bash
+pebble build
+pebble install --emulator emery
+pebble screenshot --scale 6 --no-open screenshot.png   # then view screenshot.png
+pebble emu-button click select                          # drive the app
+pebble screenshot --scale 6 --no-open screenshot.png   # check the new state
+pebble logs --emulator emery                            # APP_LOG output and crashes
+```
+
+Repeat with `--emulator <platform>` for each platform in `targetPlatforms` in package.json. Round displays (chalk, gabbro) and the smaller aplite/diorite screens need their own check.
 
 ### Headless Environments
 
@@ -94,7 +112,7 @@ Key Entry Points:
 
 ## Development Best Practices
 
-- Whenever making changes, run `pebble screenshot --scale 6` and view the screenshot to make sure it's what the user requested. If not, make more changes until it does what it's supposed to.
+- Whenever making changes, run `pebble screenshot --scale 6 --no-open screenshot.png` and view the screenshot to make sure it's what the user requested. If not, make more changes until it does what it's supposed to.
 
 ## Emulator Button Control
 
