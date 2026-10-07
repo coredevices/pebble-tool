@@ -639,4 +639,6 @@ class ScreenshotCommand(PebbleCommand):
                             help="FPS cap for --gif-all-platforms capture (default: 30).")
         parser.add_argument('--all-platforms', action='store_true',
                             help="Build and capture screenshots on emulator for each platform supported by this app.")
+        parser.add_argument('--scale', type=_positive_int, default=1,
+                            help="Integer upscale factor for the saved image (nearest-neighbour; default: 1).")
         return parser
