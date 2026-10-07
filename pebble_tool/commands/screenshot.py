@@ -276,7 +276,8 @@ class ScreenshotCommand(PebbleCommand):
             self._run_ffmpeg([
                 'ffmpeg', '-framerate', str(target_fps), '-i', seq_pattern,
                 '-i', palette,
-                '-filter_complex', '[0:v]{}mpdecimate[v];[v][1:v]paletteuse=dither=none'.format(gain),
+                '-filter_complex', '[0:v]{}{}mpdecimate[v];[v][1:v]paletteuse=dither=none'.format(
+                    gain, self._gif_scale_filter(getattr(args, 'scale', 1))),
                 '-y', filename, '-v', 'error',
             ], "GIF encoding")
 
@@ -617,6 +618,13 @@ class ScreenshotCommand(PebbleCommand):
                 scaled_image.append(scaled_row)
 
         return scaled_image
+
+    @staticmethod
+    def _gif_scale_filter(scale):
+        """ffmpeg filter fragment that applies --scale to GIF frames (nearest-neighbour)."""
+        if scale <= 1:
+            return ''
+        return 'scale=iw*{0}:ih*{0}:flags=neighbor,'.format(scale)
 
     @classmethod
     def _generate_filename(cls):

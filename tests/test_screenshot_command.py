@@ -39,3 +39,11 @@ class TestScaleImage:
     def test_scale_one_is_identity(self):
         image = [[1, 2, 3, 4]]
         assert ScreenshotCommand._scale_image(None, image, 1) is image
+
+
+class TestGifScaleFilter:
+    def test_scale_one_adds_nothing(self):
+        assert ScreenshotCommand._gif_scale_filter(1) == ""
+
+    def test_scale_uses_nearest_neighbour(self):
+        assert ScreenshotCommand._gif_scale_filter(6) == "scale=iw*6:ih*6:flags=neighbor,"
