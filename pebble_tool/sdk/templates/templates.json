@@ -47,6 +47,14 @@
             ".cursor/rules/pebble.mdc": "app/ai.md"
         }
     },
+    "plugin": {
+        "default": {
+            "src/plugin/index.js": "plugin/index.js",
+            "wscript": "plugin/wscript",
+            "package.json": "plugin/package.json",
+            "README.md": "plugin/README.md"
+        }
+    },
     "lib": {
         "default": {
             "src/c/${project_name}.c": "lib/lib.c",

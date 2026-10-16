@@ -1,0 +1,37 @@
+{
+  "name": "${project_name}",
+  "author": "MakeAwesomeHappen",
+  "version": "1.0.0",
+  "keywords": ["pebble-plugin"],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "${display_name}",
+    "uuid": "${uuid}",
+    "sdkVersion": "${sdk_version}",
+    "projectType": "plugin",
+    "plugin": {
+      "description": "Counts how many times its increment action has run.",
+      "script": "src/plugin/index.js",
+      "sources": [
+        {
+          "category": "demo",
+          "items": ["counter"],
+          "properties": {
+            "name": ["shortText"],
+            "count": ["numericValue", "shortText"]
+          },
+          "suggestedRefreshIntervalSec": 300
+        }
+      ],
+      "actions": [
+        {
+          "name": "increment",
+          "description": "Add one to the counter.",
+          "parameters": { "type": "object", "properties": {}, "required": [] },
+          "targets": ["demo/counter"]
+        }
+      ]
+    }
+  }
+}
