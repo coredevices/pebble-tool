@@ -8,4 +8,4 @@ in their PebbleKit JS.
 * `src/plugin/index.js` answers the requests.
 
 Build it with `pebble build`, and try it in the emulator with
-`pebble install --emulator basalt` alongside an app that uses it.
+`pebble install --emulator emery` alongside an app that uses it.
