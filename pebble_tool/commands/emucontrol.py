@@ -14,10 +14,14 @@ from libpebble2.protocol.system import TimeMessage, SetUTC
 import math
 import os
 import struct
+import webbrowser
+from urllib.error import URLError
+from urllib.request import urlopen
 
 from .base import PebbleCommand
-from ..exceptions import ToolError
+from ..exceptions import PebbleProjectException, ToolError
 from pebble_tool.sdk.emulator import ManagedEmulatorTransport
+from pebble_tool.sdk.project import PebbleProject
 from pebble_tool.util.browser import BrowserController
 
 
@@ -111,6 +115,10 @@ class EmuAppConfigCommand(PebbleCommand):
 
     def __call__(self, args):
         super(EmuAppConfigCommand, self).__call__(args)
+        uuid = args.uuid or self._plugin_project_uuid()
+        if uuid is not None:
+            self._open_served_page(uuid)
+            return
         try:
             if isinstance(self.pebble.transport, ManagedEmulatorTransport):
                 self.pebble.transport.send_packet(WebSocketPhonesimAppConfig(config=AppConfigSetup()),
@@ -129,6 +137,28 @@ class EmuAppConfigCommand(PebbleCommand):
         browser = BrowserController()
         browser.open_config_page(config_url, self.handle_config_close)
 
+    @staticmethod
+    def _plugin_project_uuid():
+        """A plugin project's own page: a plugin is never the running app to ask for one."""
+        try:
+            project = PebbleProject()
+        except PebbleProjectException:
+            return None
+        return str(project.uuid) if project.project_type == 'plugin' else None
+
+    def _open_served_page(self, uuid):
+        """Open a pbw's config page as the emulator's phone serves it, talking to its plugin and app."""
+        if not isinstance(self.pebble.transport, ManagedEmulatorTransport):
+            raise ToolError("App config is only supported over phonesim connections.")
+        url = 'http://localhost:{}/config/{}/'.format(self.pebble.transport.pypkjs_port, uuid)
+        try:
+            urlopen(url).close()
+        except URLError:
+            raise ToolError("The emulator has no config page for {}. Is it installed, and does its "
+                            "package.json name a configPage?".format(uuid))
+        print("Opening {}".format(url))
+        webbrowser.open_new(url)
+
     def handle_config_close(self, query):
         if query == '':
             self.pebble.transport.send_packet(WebSocketPhonesimAppConfig(config=AppConfigCancelled()),
@@ -141,6 +171,8 @@ class EmuAppConfigCommand(PebbleCommand):
     def add_parser(cls, parser):
         parser = super(EmuAppConfigCommand, cls).add_parser(parser)
         parser.add_argument('--file', help="Name of local file to use for settings page in lieu of URL specified in JS")
+        parser.add_argument('--uuid', help="Open the config page of this installed pbw, such as a plugin, rather than "
+                                           "the running app's. Defaults to the current project if it is a plugin.")
         return parser
 
 
