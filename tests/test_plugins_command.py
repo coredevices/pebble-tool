@@ -13,6 +13,7 @@ from pebble_tool.commands import plugins as plugins_module
 from pebble_tool.commands.plugins import PluginsCommand
 from pebble_tool.exceptions import ToolError
 from pebble_tool.sdk.emulator import ManagedEmulatorTransport
+from pebble_tool.util import phonesim
 
 LISTED = [
     {'uuid': '00000000-0000-0000-0001-000000000002', 'name': 'Weather', 'kind': 'builtin',
@@ -55,7 +56,7 @@ def command(monkeypatch):
             assert url == 'ws://localhost:9000/'
             sockets.append(FakeSocket(replies))
             return sockets[-1]
-        monkeypatch.setattr(plugins_module.websocket, 'create_connection', create_connection)
+        monkeypatch.setattr(phonesim.websocket, 'create_connection', create_connection)
         cmd = PluginsCommand()
         transport = ManagedEmulatorTransport.__new__(ManagedEmulatorTransport)
         transport.pypkjs_port = 9000

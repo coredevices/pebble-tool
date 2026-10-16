@@ -1,11 +1,9 @@
 import json
 
-import websocket
-
 from .base import PebbleCommand
 from .emucontrol import EmuAppConfigCommand
 from ..exceptions import ToolError
-from pebble_tool.sdk.emulator import ManagedEmulatorTransport
+from ..util import phonesim
 
 PLUGIN_OPCODE = 0x0d
 LIST = 0x02
@@ -40,23 +38,8 @@ class PluginsCommand(PebbleCommand):
         return wanted
 
     def _request(self, command, body=''):
-        transport = self.pebble.transport
-        if not isinstance(transport, ManagedEmulatorTransport):
-            raise ToolError("Plugins can only be managed on the emulator.")
-        # Separate from libpebble2's connection, which doesn't know this opcode.
-        ws = websocket.create_connection('ws://localhost:{}/'.format(transport.pypkjs_port), timeout=10)
-        try:
-            ws.send_binary(bytes([PLUGIN_OPCODE, command]) + body.encode('utf-8'))
-            reply = ws.recv()
-            while not (isinstance(reply, bytes) and reply[:1] == bytes([PLUGIN_OPCODE])):
-                reply = ws.recv()
-        except websocket.WebSocketTimeoutException:
-            raise ToolError("The emulator didn't answer. Its pypkjs may be too old to manage plugins.")
-        finally:
-            ws.close()
-        if reply[1:2] != b'\x00':
-            raise ToolError(reply[2:].decode('utf-8') or "The emulator refused.")
-        return json.loads(reply[2:].decode('utf-8')) if len(reply) > 2 else None
+        result = phonesim.request(self.pebble.transport, PLUGIN_OPCODE, bytes([command]) + body.encode('utf-8'))
+        return json.loads(result.decode('utf-8')) if result else None
 
     @classmethod
     def add_parser(cls, parser):
