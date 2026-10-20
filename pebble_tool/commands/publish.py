@@ -18,6 +18,7 @@ from colorama import Fore, Style, init as colorama_init
 
 from pebble_tool.account import get_account
 from pebble_tool.commands.base import BaseCommand
+from pebble_tool.commands.oauth_connector import configure_connector, get_connectors
 from pebble_tool.commands.screenshot import ScreenshotCommand
 from pebble_tool.commands.sdk.project.build import BuildCommand
 from pebble_tool.exceptions import BuildError, ToolError
@@ -207,6 +208,8 @@ class PublishCommand(BaseCommand):
                     resolved_app_id = self._lookup_app_id_case_insensitive(app_lookup_after, pbw_metadata["app_uuid"])
 
             self._print_upload_result(response_payload, resolved_app_id)
+            if pbw_metadata.get("oauth_slugs") and resolved_app_id:
+                self._setup_connectors(args, resolved_app_id, firebase_id_token, pbw_metadata["oauth_slugs"])
         finally:
             if temp_pbw_path and os.path.exists(temp_pbw_path):
                 try:
@@ -245,8 +248,10 @@ class PublishCommand(BaseCommand):
         platforms = list(project.target_platforms)
         app_name = getattr(project, "long_name", None) or getattr(project, "short_name", None) or os.path.basename(project.project_dir)
         app_type = "watchface" if getattr(project, "is_watchface", False) else "watchapp"
+        oauth_slugs = []
 
         with zipfile.ZipFile(pbw_path) as zf:
+            has_binary = any(name.endswith("pebble-app.bin") for name in zf.namelist())
             for metadata_name in ("appinfo.json", "manifest.json"):
                 if metadata_name not in zf.namelist():
                     continue
@@ -261,6 +266,12 @@ class PublishCommand(BaseCommand):
                     app_type = "watchface"
                 elif watchapp:
                     app_type = "watchapp"
+                plugin = metadata.get("plugin")
+                if isinstance(plugin, dict):
+                    oauth_slugs = list((plugin.get("oauth") or {}).keys())
+                    if not has_binary:
+                        # Phone-only plugin: nothing runs on the watch.
+                        app_type = "plugin"
                 break
 
         return {
@@ -269,6 +280,7 @@ class PublishCommand(BaseCommand):
             "platforms": platforms,
             "app_name": app_name,
             "app_type": app_type,
+            "oauth_slugs": oauth_slugs,
         }
 
     @classmethod
@@ -448,6 +460,9 @@ class PublishCommand(BaseCommand):
         return gif_paths, screenshot_paths
 
     def _collect_screenshot_assets(self, args, pbw_metadata, allow_skip=False):
+        if pbw_metadata.get("app_type") == "plugin" and not getattr(args, "screenshots", None):
+            # A phone-only plugin has no watch screen to capture.
+            return [], []
         if args.non_interactive:
             local_files = getattr(args, "screenshots", None) or []
             if local_files:
@@ -689,6 +704,8 @@ class PublishCommand(BaseCommand):
 
     @classmethod
     def _prompt_category_key(cls, me_payload, app_type):
+        if app_type == "plugin":
+            return cls._prompt_plugin_category(me_payload)
         options = list((me_payload.get("app_category_options") or []))
         if app_type == "watchface":
             face_options = ((me_payload.get("category_options") or {}).get("watchface") or [])
@@ -730,6 +747,32 @@ class PublishCommand(BaseCommand):
             return cls._normalize_category_value(raw)
 
     @classmethod
+    def _plugin_category_options(cls, me_payload):
+        options = ((me_payload.get("category_options") or {}).get("plugin") or [])
+        options = [(item.get("slug") or item.get("id"), item.get("name") or item.get("slug")) for item in options]
+        # Productivity first: it's the default.
+        return sorted(options, key=lambda option: option[0] != "productivity")
+
+    @classmethod
+    def _prompt_plugin_category(cls, me_payload):
+        options = cls._plugin_category_options(me_payload)
+        if not options:
+            raise ToolError("The appstore offered no plugin categories; is the API base up to date?")
+        print("{}{}Choose a category (you can change this later).{}".format(Style.BRIGHT, Fore.BLUE, Style.RESET_ALL))
+        for index, (slug, name) in enumerate(options, 1):
+            print("  {}) {} ({})".format(index, name, slug))
+        slugs = [slug for slug, _ in options]
+        while True:
+            raw = input("Category [{}]: ".format(slugs[0])).strip()
+            if not raw:
+                return slugs[0]
+            if raw.isdigit() and 1 <= int(raw) <= len(slugs):
+                return slugs[int(raw) - 1]
+            if raw in slugs:
+                return raw
+            print("{}Choose a number or one of: {}{}".format(Fore.YELLOW, ", ".join(slugs), Style.RESET_ALL))
+
+    @classmethod
     def _prompt_new_app_details(cls, pbw_metadata, me_payload, default_version=None):
         print("{}{}You can change this later in the web dashboard.{}".format(Style.BRIGHT, Fore.BLUE, Style.RESET_ALL))
 
@@ -742,12 +785,12 @@ class PublishCommand(BaseCommand):
 
         app_type = pbw_metadata.get("app_type") or "watchapp"
         category_key = None
-        if app_type == "watchapp":
+        if app_type in ("watchapp", "plugin"):
             category_key = cls._prompt_category_key(me_payload, app_type)
 
         icon_small = ""
         icon_large = ""
-        if app_type == "watchapp":
+        if app_type in ("watchapp", "plugin"):
             print("{}{}Do you have app icons already or would you like to automatically generate them?{}".format(
                 Style.BRIGHT, Fore.BLUE, Style.RESET_ALL
             ))
@@ -777,6 +820,9 @@ class PublishCommand(BaseCommand):
     def _default_category_key(cls, me_payload, app_type):
         if app_type == "watchface":
             return None
+        if app_type == "plugin":
+            options = cls._plugin_category_options(me_payload)
+            return options[0][0] if options else None
         options = list((me_payload.get("app_category_options") or []))
         if app_type == "watchface":
             face_options = ((me_payload.get("category_options") or {}).get("watchface") or [])
@@ -815,7 +861,8 @@ class PublishCommand(BaseCommand):
             "version": (getattr(args, "version", None) or default_version).strip(),
             "description": description,
             "source": (getattr(args, "source", None) or default_source).strip(),
-            "category": cls._normalize_category_value(category.strip().lower()) if category else None,
+            "category": (category.strip().lower() if app_type == "plugin" else
+                         cls._normalize_category_value(category.strip().lower())) if category else None,
             "icon_small_path": (getattr(args, "icon_small", None) or "").strip(),
             "icon_large_path": (getattr(args, "icon_large", None) or "").strip(),
         }
@@ -848,7 +895,7 @@ class PublishCommand(BaseCommand):
         if create_details.get("category"):
             form_data["category"] = create_details["category"]
         auto_generate_icons = (
-            pbw_metadata.get("app_type") == "watchapp"
+            pbw_metadata.get("app_type") in ("watchapp", "plugin")
             and not create_details.get("icon_small_path")
             and not create_details.get("icon_large_path")
         )
@@ -958,6 +1005,25 @@ class PublishCommand(BaseCommand):
                 return str(candidate)
         return None
 
+    def _setup_connectors(self, args, app_id, firebase_id_token, slugs):
+        """Offers to set up each OAuth connector the plugin declares that isn't set up yet."""
+        self._step("OAuth connectors")
+        state = get_connectors(args.api_base, app_id, firebase_id_token)
+        configured = {c["slug"] for c in state.get("connectors") or [] if c.get("has_secret")}
+        for slug in slugs:
+            if slug in configured and not args.reconfigure_oauth:
+                self._ok("Connector '{}' is set up. (--reconfigure-oauth to change it.)".format(slug))
+                continue
+            if args.non_interactive:
+                self._warn("Connector '{}' isn't set up. Users can't sign in until you run "
+                           "'pebble oauth-connector set --slug {}'.".format(slug, slug))
+                continue
+            answer = input("Set up OAuth connector '{}' now? [Y/n]: ".format(slug)).strip().lower()
+            if answer in ("n", "no"):
+                self._warn("Skipped. Run 'pebble oauth-connector set --slug {}' later.".format(slug))
+                continue
+            configure_connector(args, args.api_base, app_id, firebase_id_token, slug, state, interactive=True)
+
     def _print_upload_result(self, response_payload, app_id=None):
         message = response_payload.get("message") or "Publish completed successfully"
         self._ok(message)
@@ -1017,6 +1083,8 @@ class PublishCommand(BaseCommand):
         parser.add_argument("--screenshots", nargs="+", default=None, metavar="FILE",
                             help="Local screenshot/GIF files to upload in --non-interactive mode. "
                                  "Filenames must start with the platform name, e.g. emery_screenshot.png.")
+        parser.add_argument("--reconfigure-oauth", action="store_true", default=False,
+                            help="Prompt for every OAuth connector the plugin declares, even ones already set up.")
         parser.add_argument("--replace-screenshots", action="store_true", default=False,
                             help="Replace the app's existing screenshots with the uploaded ones "
                                  "instead of appending (existing apps only). Irreversible via the "
