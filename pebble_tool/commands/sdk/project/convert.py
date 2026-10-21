@@ -9,6 +9,7 @@ from shutil import copy2
 
 from pebble_tool.commands.sdk.project import SDKProjectCommand
 from pebble_tool.exceptions import OutdatedProjectException, ToolError
+from pebble_tool.sdk import manifest_v2
 from pebble_tool.sdk.project import NpmProject
 from pebble_tool.sdk import get_pebble_platforms
 
@@ -110,3 +111,37 @@ class PblProjectConverter(SDKProjectCommand):
 
         with open(app_info_path, "w") as f:
             json.dump(app_info_json, f, indent=2, separators=(',', ': '))
+
+
+class ManifestV2Converter(SDKProjectCommand):
+    """Converts a project to manifest version 2, declaring the permissions its JavaScript uses."""
+    command = 'convert-manifest'
+
+    def __call__(self, args):
+        super(ManifestV2Converter, self).__call__(args)
+        if not isinstance(self.project, NpmProject):
+            raise ToolError("This project still uses appinfo.json: run `pebble convert-project` first.")
+        with open('package.json') as f:
+            package = json.load(f)
+        changes = manifest_v2.upgrade(package['pebble'], manifest_v2.scan(os.getcwd(), package['pebble']))
+        if not changes:
+            print("Nothing to change: the project is manifest version 2 and declares everything its "
+                  "JavaScript visibly uses.")
+            return
+        for change, where in changes:
+            print("  {}{}".format(change, "  ({})".format(where) if where else ""))
+        if args.dry_run:
+            print("Dry run: package.json is unchanged.")
+        else:
+            with open('package.json', 'w') as f:
+                json.dump(package, f, indent=2, separators=(',', ': '))
+                f.write("\n")
+            print("Updated package.json.")
+        print("Only URLs written out in the JavaScript are found. Try the app on the emulator: "
+              "`pebble logs` warns about any request the phone would refuse.")
+
+    @classmethod
+    def add_parser(cls, parser):
+        parser = super(ManifestV2Converter, cls).add_parser(parser)
+        parser.add_argument('--dry-run', action='store_true', help="Show the changes without making them.")
+        return parser
