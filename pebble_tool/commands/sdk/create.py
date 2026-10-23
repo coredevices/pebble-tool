@@ -198,7 +198,7 @@ class NewProjectCommand(SDKCommand):
         c_group.add_argument("--simple", action="store_true", help="Create a minimal C file.")
         c_group.add_argument("--javascript", action="store_true", help="Generate a JavaScript file.")
         c_group.add_argument("--worker", action="store_true", help="Generate a background worker.")
-        c_group.add_argument("--ai", action="store_true", help="Generate templates for Claude Code and Cursor")
+        c_group.add_argument("--ai", action="store_true", help="Generate AGENTS.md, CLAUDE.md and a Cursor rule for AI coding agents.")
         return parser
 
 

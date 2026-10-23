@@ -276,7 +276,8 @@ class ScreenshotCommand(PebbleCommand):
             self._run_ffmpeg([
                 'ffmpeg', '-framerate', str(target_fps), '-i', seq_pattern,
                 '-i', palette,
-                '-filter_complex', '[0:v]{}mpdecimate[v];[v][1:v]paletteuse=dither=none'.format(gain),
+                '-filter_complex', '[0:v]{}{}mpdecimate[v];[v][1:v]paletteuse=dither=none'.format(
+                    gain, self._gif_scale_filter(getattr(args, 'scale', 1))),
                 '-y', filename, '-v', 'error',
             ], "GIF encoding")
 
@@ -618,6 +619,13 @@ class ScreenshotCommand(PebbleCommand):
 
         return scaled_image
 
+    @staticmethod
+    def _gif_scale_filter(scale):
+        """ffmpeg filter fragment that applies --scale to GIF frames (nearest-neighbour)."""
+        if scale <= 1:
+            return ''
+        return 'scale=iw*{0}:ih*{0}:flags=neighbor,'.format(scale)
+
     @classmethod
     def _generate_filename(cls):
         return datetime.datetime.now().strftime("pebble_screenshot_%Y-%m-%d_%H-%M-%S.png")
@@ -639,4 +647,6 @@ class ScreenshotCommand(PebbleCommand):
                             help="FPS cap for --gif-all-platforms capture (default: 30).")
         parser.add_argument('--all-platforms', action='store_true',
                             help="Build and capture screenshots on emulator for each platform supported by this app.")
+        parser.add_argument('--scale', type=_positive_int, default=1,
+                            help="Integer upscale factor for the saved image (nearest-neighbour; default: 1).")
         return parser

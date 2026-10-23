@@ -21,7 +21,8 @@
             "README.md": "moddable/README.md"
         },
         "ai": {
-            "CLAUDE.md": "app/ai.md",
+            "AGENTS.md": "app/ai.md",
+            "CLAUDE.md": "app/claude.md",
             ".cursor/rules/pebble.mdc": "app/ai.md"
         }
     },
@@ -43,7 +44,8 @@
             "src/pkjs/index.js": "app/index.js"
         },
         "ai": {
-            "CLAUDE.md": "app/ai.md",
+            "AGENTS.md": "app/ai.md",
+            "CLAUDE.md": "app/claude.md",
             ".cursor/rules/pebble.mdc": "app/ai.md"
         }
     },
