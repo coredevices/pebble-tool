@@ -29,6 +29,8 @@ from sourcemap.exceptions import SourceMapDecodeError
 
 logger = logging.getLogger("pebble_tool.util.logs")
 
+PLUGIN_LOG_MARKER = "[plugin] "
+
 
 class PebbleLogPrinter(object):
     colour_scheme = OrderedDict([
@@ -139,8 +141,12 @@ class PebbleLogPrinter(object):
 
     def handle_phone_log(self, packet):
         assert isinstance(packet, WebSocketPhoneAppLog)
-        logstr = self._sourcemap_translate_js_log(packet.payload)
-        self._print(packet, "[{}] pkjs> {}".format(datetime.now().strftime("%H:%M:%S"), logstr))
+        # Plugins' logs come down the same channel as PKJS's, marked so they can be told apart.
+        if packet.payload.startswith(PLUGIN_LOG_MARKER):
+            source, logstr = "plugin", packet.payload[len(PLUGIN_LOG_MARKER):]
+        else:
+            source, logstr = "pkjs", self._sourcemap_translate_js_log(packet.payload)
+        self._print(packet, "[{}] {}> {}".format(datetime.now().strftime("%H:%M:%S"), source, logstr))
 
     def handle_connection(self, packet):
         assert isinstance(packet, WebSocketConnectionStatusUpdate)
