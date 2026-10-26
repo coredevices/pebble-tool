@@ -139,11 +139,17 @@ class PublishCommand(BaseCommand):
                 )
         self._ok("Developer link check successful.")
 
-        self._build_project(args)
-        project = PebbleProject()
-        pbw_path = self._pbw_path_for_project(project)
-        if not os.path.exists(pbw_path):
-            raise ToolError("Build completed but PBW was not found at {}".format(pbw_path))
+        if getattr(args, "pbw", None):
+            project = PebbleProject()
+            pbw_path = args.pbw
+            if not os.path.exists(pbw_path):
+                raise ToolError("PBW not found at {}".format(pbw_path))
+        else:
+            self._build_project(args)
+            project = PebbleProject()
+            pbw_path = self._pbw_path_for_project(project)
+            if not os.path.exists(pbw_path):
+                raise ToolError("Build completed but PBW was not found at {}".format(pbw_path))
 
         pbw_metadata = self._extract_pbw_metadata(pbw_path, project)
         upload_pbw_path, normalized_uuid, temp_pbw_path = self._create_uuid_normalized_pbw(pbw_path)
@@ -485,7 +491,10 @@ class PublishCommand(BaseCommand):
                 if not allow_skip:
                     self._validate_screenshot_assets(gif_paths, screenshot_paths)
                 return gif_paths, screenshot_paths
-            gif_paths, screenshot_paths = self._capture_with_emulator(args)
+            if getattr(args, "pbw", None):
+                gif_paths, screenshot_paths = [], []
+            else:
+                gif_paths, screenshot_paths = self._capture_with_emulator(args)
             if not allow_skip:
                 self._validate_screenshot_assets(gif_paths, screenshot_paths)
             return gif_paths, screenshot_paths
@@ -1012,6 +1021,9 @@ class PublishCommand(BaseCommand):
                  "PEBBLE_APPSTORE_API_BASE or {}.".format(DEFAULT_APPSTORE_API_BASE),
         )
         parser.add_argument("--release-notes", default="", help="Release notes text.")
+        parser.add_argument("--pbw", default=None,
+                            help="Publish this already-built PBW instead of building the project. "
+                                 "Screenshots come only from --screenshots; the emulator isn't run.")
         parser.add_argument("--is-published", action="store_true", default=False,
                             help="Create/publish release as visible immediately (default: false).")
         parser.set_defaults(capture_gif_all_platforms=True)

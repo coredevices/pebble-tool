@@ -336,3 +336,12 @@ def test_screenshot_retry_path_never_sends_replace_true(monkeypatch, tmp_path):
     assert len(calls) == 2
     assert calls[0]["replaceScreenshots"] == "true"
     assert calls[1]["replaceScreenshots"] == "false"
+
+
+def test_collect_screenshot_assets_with_prebuilt_pbw_skips_emulator(monkeypatch):
+    def fake_capture(self, args):
+        raise AssertionError("emulator must not run for a prebuilt PBW")
+
+    monkeypatch.setattr(PublishCommand, "_capture_with_emulator", fake_capture)
+    args = Namespace(non_interactive=True, screenshots=None, pbw="app.pbw")
+    assert PublishCommand()._collect_screenshot_assets(args, {}, allow_skip=True) == ([], [])
