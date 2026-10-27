@@ -363,8 +363,9 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
         emulator_platform = getattr(args, 'emulator', None)
         emulator_sdk = getattr(args, 'sdk', None)
         vnc_enabled = getattr(args, 'vnc', False)
+        sunlight_enabled = getattr(args, 'sunlight', False)
         if emulator_platform:
-            return emulator_platform, emulator_sdk, vnc_enabled
+            return emulator_platform, emulator_sdk, vnc_enabled, sunlight_enabled
         elif 'PEBBLE_EMULATOR' in os.environ:
             emulator_platform = os.environ['PEBBLE_EMULATOR']
             if emulator_platform not in get_pebble_platforms():
@@ -378,7 +379,7 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
             elif len(running) > 1:
                 raise ToolError("Multiple emulators are running; you must specify which to use.")
 
-        return (emulator_platform, emulator_sdk, vnc_enabled)
+        return (emulator_platform, emulator_sdk, vnc_enabled, sunlight_enabled)
 
     @classmethod
     def post_connect(cls, connection):
@@ -401,6 +402,8 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
         emu_group.add_argument('--sdk', type=str, help="When using --emulator, SDK version to launch."
                                " Defaults to the active SDK (currently {})".format(sdk_version()))
         emu_group.add_argument('--vnc', action='store_true', help="When using --emulator, enable VNC server.")
+        emu_group.add_argument('--sunlight', action='store_true',
+                               help="When using --emulator, render sunlight-corrected colors.")
 
 def register_children(parser):
     subparsers = parser.add_subparsers(title="command")
