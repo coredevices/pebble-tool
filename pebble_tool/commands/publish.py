@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 import zipfile
+from urllib.parse import urlparse
 
 import requests
 from colorama import Fore, Style, init as colorama_init
@@ -113,11 +114,14 @@ class PublishCommand(BaseCommand):
 
         firebase_id_token = (getattr(args, "firebase_id_token", None) or os.getenv("PEBBLE_FIREBASE_ID_TOKEN", "")).strip()
         if not firebase_id_token:
+            firebase_id_token = self._github_oidc_token(args.api_base)
+        if not firebase_id_token:
             account = get_account(auth_provider="firebase")
             if not account.is_logged_in:
                 raise ToolError(
                     "Not logged in with Firebase. Run 'pebble login' first, "
-                    "or pass --firebase-id-token / set PEBBLE_FIREBASE_ID_TOKEN for CI."
+                    "or pass --firebase-id-token / set PEBBLE_FIREBASE_ID_TOKEN for CI, "
+                    "or run in GitHub Actions with id-token: write permission."
                 )
             firebase_id_token = account.get_access_token()
 
@@ -135,11 +139,17 @@ class PublishCommand(BaseCommand):
                 )
         self._ok("Developer link check successful.")
 
-        self._build_project(args)
-        project = PebbleProject()
-        pbw_path = self._pbw_path_for_project(project)
-        if not os.path.exists(pbw_path):
-            raise ToolError("Build completed but PBW was not found at {}".format(pbw_path))
+        if getattr(args, "pbw", None):
+            project = PebbleProject()
+            pbw_path = args.pbw
+            if not os.path.exists(pbw_path):
+                raise ToolError("PBW not found at {}".format(pbw_path))
+        else:
+            self._build_project(args)
+            project = PebbleProject()
+            pbw_path = self._pbw_path_for_project(project)
+            if not os.path.exists(pbw_path):
+                raise ToolError("Build completed but PBW was not found at {}".format(pbw_path))
 
         pbw_metadata = self._extract_pbw_metadata(pbw_path, project)
         upload_pbw_path, normalized_uuid, temp_pbw_path = self._create_uuid_normalized_pbw(pbw_path)
@@ -327,6 +337,28 @@ class PublishCommand(BaseCommand):
         return response, payload
 
     @classmethod
+    def _github_oidc_token(cls, api_base):
+        request_url = os.getenv("ACTIONS_ID_TOKEN_REQUEST_URL")
+        request_token = os.getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
+        if not request_url or not request_token:
+            return None
+        parsed = urlparse(api_base)
+        audience = "{}://{}".format(parsed.scheme, parsed.netloc)
+        try:
+            response = requests.get(
+                request_url,
+                params={"audience": audience},
+                headers={"Authorization": "bearer {}".format(request_token)},
+                timeout=30,
+            )
+            response.raise_for_status()
+            token = response.json()["value"]
+        except (requests.RequestException, ValueError, KeyError) as e:
+            raise ToolError("Failed to get GitHub Actions OIDC token: {}".format(e))
+        print("Using GitHub Actions OIDC token (audience {}).".format(audience))
+        return token
+
+    @classmethod
     def _get_me_context(cls, api_base, firebase_id_token):
         if not api_base:
             raise ToolError(
@@ -459,7 +491,10 @@ class PublishCommand(BaseCommand):
                 if not allow_skip:
                     self._validate_screenshot_assets(gif_paths, screenshot_paths)
                 return gif_paths, screenshot_paths
-            gif_paths, screenshot_paths = self._capture_with_emulator(args)
+            if getattr(args, "pbw", None):
+                gif_paths, screenshot_paths = [], []
+            else:
+                gif_paths, screenshot_paths = self._capture_with_emulator(args)
             if not allow_skip:
                 self._validate_screenshot_assets(gif_paths, screenshot_paths)
             return gif_paths, screenshot_paths
@@ -986,6 +1021,9 @@ class PublishCommand(BaseCommand):
                  "PEBBLE_APPSTORE_API_BASE or {}.".format(DEFAULT_APPSTORE_API_BASE),
         )
         parser.add_argument("--release-notes", default="", help="Release notes text.")
+        parser.add_argument("--pbw", default=None,
+                            help="Publish this already-built PBW instead of building the project. "
+                                 "Screenshots come only from --screenshots; the emulator isn't run.")
         parser.add_argument("--is-published", action="store_true", default=False,
                             help="Create/publish release as visible immediately (default: false).")
         parser.set_defaults(capture_gif_all_platforms=True)

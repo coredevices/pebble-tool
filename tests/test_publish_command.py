@@ -26,6 +26,9 @@ class _FakeResponse:
     def json(self):
         return self._payload
 
+    def raise_for_status(self):
+        pass
+
 
 def test_resolve_app_id_from_me_uses_lookup_map(monkeypatch):
     def fake_request(method, url, headers=None, json=None, timeout=None):
@@ -61,6 +64,28 @@ def test_get_me_context_returns_none_when_developer_not_linked(monkeypatch):
         firebase_id_token="id-token",
     )
     assert payload is None
+
+
+def test_github_oidc_token_requests_api_origin_audience(monkeypatch):
+    monkeypatch.setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "https://gh.example/token?api-version=2.0")
+    monkeypatch.setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "request-token")
+    calls = {}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls.update(url=url, params=params, headers=headers)
+        return _FakeResponse({"value": "oidc-token"})
+
+    monkeypatch.setattr("pebble_tool.commands.publish.requests.get", fake_get)
+
+    assert PublishCommand._github_oidc_token("https://appstore-api.repebble.com/") == "oidc-token"
+    assert calls["params"] == {"audience": "https://appstore-api.repebble.com"}
+    assert calls["headers"] == {"Authorization": "bearer request-token"}
+
+
+def test_github_oidc_token_none_outside_github_actions(monkeypatch):
+    monkeypatch.delenv("ACTIONS_ID_TOKEN_REQUEST_URL", raising=False)
+    monkeypatch.delenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", raising=False)
+    assert PublishCommand._github_oidc_token("https://appstore-api.repebble.com") is None
 
 
 def test_lookup_app_id_case_insensitive_matches_uuid():
@@ -311,3 +336,12 @@ def test_screenshot_retry_path_never_sends_replace_true(monkeypatch, tmp_path):
     assert len(calls) == 2
     assert calls[0]["replaceScreenshots"] == "true"
     assert calls[1]["replaceScreenshots"] == "false"
+
+
+def test_collect_screenshot_assets_with_prebuilt_pbw_skips_emulator(monkeypatch):
+    def fake_capture(self, args):
+        raise AssertionError("emulator must not run for a prebuilt PBW")
+
+    monkeypatch.setattr(PublishCommand, "_capture_with_emulator", fake_capture)
+    args = Namespace(non_interactive=True, screenshots=None, pbw="app.pbw")
+    assert PublishCommand()._collect_screenshot_assets(args, {}, allow_skip=True) == ([], [])
