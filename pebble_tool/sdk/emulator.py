@@ -27,6 +27,17 @@ from pebble_tool.exceptions import MissingEmulatorError, ToolError
 from pebble_tool.util.analytics import post_event
 from . import sdk_path, get_sdk_persist_dir, sdk_manager
 
+
+def pypkjs_env(account):
+    """pypkjs' environment: plugins' Pebble.oauth signs in through the appstore broker as the
+    `pebble login` user."""
+    env = dict(os.environ)
+    if account.is_logged_in and getattr(account, 'credential_path', None):
+        env['PYPKJS_FIREBASE_CREDENTIALS'] = account.credential_path
+    if os.getenv('PEBBLE_APPSTORE_API_BASE'):
+        env['PYPKJS_APPSTORE_API_BASE'] = os.environ['PEBBLE_APPSTORE_API_BASE']
+    return env
+
 logger = logging.getLogger("pebble_tool.sdk.emulator")
 black_hole = open(os.devnull, 'w')
 
@@ -558,7 +569,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
         logger.info("pypkjs command: %s", subprocess.list2cmdline(command))
         # Detached into its own process group so a terminal Ctrl+C doesn't kill it.
         process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output(),
-                                   start_new_session=True)
+                                   start_new_session=True, env=pypkjs_env(account))
         time.sleep(0.5)
         if process.poll() is not None:
             try:
@@ -791,7 +802,7 @@ class ExternalQemuTransport(WebsocketTransport):
         logger.info("pypkjs command: %s", subprocess.list2cmdline(command))
         # Detached into its own process group so a terminal Ctrl+C doesn't kill it.
         process = subprocess.Popen(command, stdout=self._get_output(), stderr=self._get_output(),
-                                   start_new_session=True)
+                                   start_new_session=True, env=pypkjs_env(account))
         time.sleep(0.5)
         if process.poll() is not None:
             try:

@@ -164,9 +164,9 @@ class SDKManager(object):
 
     def install_from_path(self, path):
         with open(path, 'rb') as f:
-            self._install_from_handle(f)
+            self._install_from_handle(f, toolchain_dir=os.path.dirname(os.path.abspath(path)))
 
-    def _install_from_handle(self, f):
+    def _install_from_handle(self, f, toolchain_dir=None):
         path = None
         try:
             print("Extracting...")
@@ -204,18 +204,25 @@ class SDKManager(object):
             platform_name = "mac" if platform.system() == "Darwin" else "linux"
             arch = platform.machine()
 
-            # Try architecture-specific toolchain first, fall back to platform-only
-            arch_specific_url = f"{self.DOWNLOAD_SERVER}/releases/{sdk_info['version']}/toolchain-{platform_name}-{arch}.tar.gz"
-            fallback_url = f"{self.DOWNLOAD_SERVER}/releases/{sdk_info['version']}/toolchain-{platform_name}.tar.gz"
+            # A toolchain shipped alongside a local SDK file wins over the download server.
+            local_toolchain = self._local_toolchain(toolchain_dir, platform_name, arch)
+            if local_toolchain is not None:
+                toolchain_path, toolchain_platform = local_toolchain
+                with open(toolchain_path, 'rb') as tf:
+                    self._install_toolchain_from_handle(tf, sdk_info['version'], toolchain_platform)
+            else:
+                # Try architecture-specific toolchain first, fall back to platform-only
+                arch_specific_url = f"{self.DOWNLOAD_SERVER}/releases/{sdk_info['version']}/toolchain-{platform_name}-{arch}.tar.gz"
+                fallback_url = f"{self.DOWNLOAD_SERVER}/releases/{sdk_info['version']}/toolchain-{platform_name}.tar.gz"
 
-            try:
-                response = requests.head(arch_specific_url)
-                if response.status_code == 200:
-                    self.install_toolchain_from_url(arch_specific_url, sdk_info['version'], f"{platform_name}-{arch}")
-                else:
+                try:
+                    response = requests.head(arch_specific_url)
+                    if response.status_code == 200:
+                        self.install_toolchain_from_url(arch_specific_url, sdk_info['version'], f"{platform_name}-{arch}")
+                    else:
+                        self.install_toolchain_from_url(fallback_url, sdk_info['version'], platform_name)
+                except requests.RequestException:
                     self.install_toolchain_from_url(fallback_url, sdk_info['version'], platform_name)
-            except requests.RequestException:
-                self.install_toolchain_from_url(fallback_url, sdk_info['version'], platform_name)
 
             print("Done.")
         except BaseException:
@@ -228,6 +235,16 @@ class SDKManager(object):
             except OSError:
                 print("Cleanup failed.")
             raise
+
+    @staticmethod
+    def _local_toolchain(toolchain_dir, platform_name, arch):
+        if toolchain_dir is None:
+            return None
+        for toolchain_platform in (f"{platform_name}-{arch}", platform_name):
+            candidate = os.path.join(toolchain_dir, f"toolchain-{toolchain_platform}.tar.gz")
+            if os.path.exists(candidate):
+                return candidate, toolchain_platform
+        return None
 
     def _install_toolchain_from_handle(self, f, sdk_version, platform_name):
         print("Extracting toolchain...")

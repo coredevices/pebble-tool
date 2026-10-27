@@ -151,6 +151,10 @@ class NewProjectCommand(SDKCommand):
             if args.simple or args.worker:
                 raise ToolError("--rocky is incompatible with --simple and --worker")
             options = ['rocky']
+        elif args.plugin:
+            if args.simple or args.worker or args.javascript:
+                raise ToolError("--plugin is incompatible with --simple, --worker and --javascript")
+            options = ['plugin']
         elif args.alloy:
             if not has_moddable_tools(sdk):
                 raise ToolError("The currently active SDK does not have Moddable tools. "
@@ -194,6 +198,9 @@ class NewProjectCommand(SDKCommand):
         exclusive_type_group.add_argument("--rocky", action="store_true", help="Create a Rocky.js project.")
         exclusive_type_group.add_argument("--c", action="store_true", help="Create a C project.")
         exclusive_type_group.add_argument("--alloy", action="store_true", help="Create an Alloy project (powered by Moddable).")
+        exclusive_type_group.add_argument("--plugin", action="store_true",
+                                          help="Create a plugin: JavaScript that runs on the phone and serves data and "
+                                               "actions to watch apps.")
         c_group = parser.add_argument_group('C-specific arguments')
         c_group.add_argument("--simple", action="store_true", help="Create a minimal C file.")
         c_group.add_argument("--javascript", action="store_true", help="Generate a JavaScript file.")
