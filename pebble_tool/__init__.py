@@ -29,6 +29,7 @@ from .commands.sdk import manage
 from .commands.sdk.project import build
 
 from .commands.base import register_children
+from .util import voice_compat  # noqa: F401  (before any connection reads from the watch)
 from .commands import (install, logs, screenshot, timeline, emucontrol, ping, account, repl,
                        transcription_server, data_logging, publish, firmware, appmessage, plugins,
                        oauth_connector)
