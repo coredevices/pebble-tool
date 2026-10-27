@@ -731,17 +731,24 @@ class EmuMicCommand(PebbleCommand):
             what = args.file
         elif args.noise:
             source, what = mic_audio.noise(amplitude), "white noise"
+        elif args.live:
+            try:
+                source = mic_audio.live()
+            except ValueError as e:
+                raise ToolError(str(e))
+            what = "your microphone"
         else:
             source, what = mic_audio.tone(args.tone, amplitude), "a {} Hz tone".format(args.tone)
         if args.duration is not None:
             source = itertools.islice(source, int(args.duration * mic_audio.SAMPLE_RATE / 320))
         print("Playing {} into the watch microphone. Ctrl-C stops.".format(what))
         try:
-            self._stream(source)
+            # A recording arrives in real time already.
+            self._stream(source, paced=not args.live)
         except KeyboardInterrupt:
             pass
 
-    def _stream(self, source):
+    def _stream(self, source, paced=True):
         start = time.monotonic()
         sent = 0
         while True:
@@ -751,7 +758,7 @@ class EmuMicCommand(PebbleCommand):
             send_raw_to_qemu(self.pebble.transport, QEMU_PROTOCOL_MIC_AUDIO, message)
             sent += len(message) // 2
             ahead = start + sent / mic_audio.SAMPLE_RATE - MIC_LEAD_SECONDS - time.monotonic()
-            if ahead > 0:
+            if paced and ahead > 0:
                 time.sleep(ahead)
 
     @classmethod
@@ -762,6 +769,8 @@ class EmuMicCommand(PebbleCommand):
         source.add_argument('--tone', type=float, default=440, metavar='HZ',
                             help="Play a sine tone at this frequency (the default, at 440 Hz).")
         source.add_argument('--noise', action='store_true', help="Play white noise.")
+        source.add_argument('--live', action='store_true',
+                            help="Relay your computer's microphone. Needs pebble-tool's mic extra.")
         parser.add_argument('--loop', action='store_true', help="Repeat the WAV file until stopped.")
         parser.add_argument('--duration', type=float, metavar='SECONDS',
                             help="Stop after this long (default: the end of the file, or Ctrl-C).")

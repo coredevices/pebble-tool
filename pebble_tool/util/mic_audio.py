@@ -78,3 +78,37 @@ def blocks(pcm, loop):
         if not loop or not pcm:
             return
 
+
+
+def live():
+    """The computer's default microphone, in blocks, until interrupted. Raises ValueError without
+    the sounddevice package or an input device."""
+    try:
+        import sounddevice
+    except (ImportError, OSError) as e:
+        raise ValueError("Recording from your microphone needs pebble-tool's mic extra "
+                         "(e.g. uv tool install 'pebble-tool[mic]'), and PortAudio on Linux: {}".format(e))
+    try:
+        stream = sounddevice.RawInputStream(samplerate=SAMPLE_RATE, channels=1, dtype='int16',
+                                            blocksize=320)
+    except sounddevice.PortAudioError as e:
+        raise ValueError("Couldn't open your microphone: {}".format(e))
+    return _record(stream)
+
+
+# A second of exact zeros: a denied or muted input rather than a quiet room.
+SILENT_BLOCKS = 50
+
+
+def _record(stream):
+    silent = 0
+    with stream:
+        while True:
+            data, _ = stream.read(320)
+            block = array.array('h', bytes(data))
+            if silent < SILENT_BLOCKS:
+                silent = silent + 1 if not any(block) else SILENT_BLOCKS + 1
+                if silent == SILENT_BLOCKS:
+                    sys.stderr.write("Your microphone is recording pure silence. On macOS, allow your terminal "
+                                     "to use it in System Settings > Privacy & Security > Microphone.\n")
+            yield _to_le_bytes(block)

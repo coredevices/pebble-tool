@@ -38,6 +38,12 @@ dependencies = [
     "websockify>=0.13.0",
     "wheel>=0.45.1",
 ]
+
+[project.optional-dependencies]
+# `pebble emu-mic --live`: the computer's microphone. Bundles PortAudio on macOS and Windows; Linux
+# needs libportaudio2.
+mic = ["sounddevice>=0.5"]
+
 [dependency-groups]
 dev = [
   "pytest >=8.4.2,<9",

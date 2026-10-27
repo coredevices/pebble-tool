@@ -120,3 +120,39 @@ def test_emu_permission_for_another_app(monkeypatch) -> None:
 def test_emu_permission_knows_only_the_microphone() -> None:
     with pytest.raises(SystemExit):
         parse(EmuPermissionCommand, ['Location'])
+
+
+class FakeStream:
+    def __init__(self, blocks):
+        self.blocks = iter(blocks)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, frames):
+        return next(self.blocks), False
+
+
+def test_live_relays_the_recording_and_warns_about_pure_silence(capsys) -> None:
+    tone = struct.pack('<320h', *([1000] * 320))
+    recording = mic_audio._record(FakeStream([bytes(640)] * mic_audio.SILENT_BLOCKS + [tone]))
+    blocks = [next(recording) for _ in range(mic_audio.SILENT_BLOCKS + 1)]
+    assert blocks[-1] == tone
+    assert 'pure silence' in capsys.readouterr().err
+
+
+def test_live_stays_quiet_for_a_quiet_room(capsys) -> None:
+    hiss = struct.pack('<320h', *([1] * 320))
+    recording = mic_audio._record(FakeStream([hiss] * (mic_audio.SILENT_BLOCKS + 1)))
+    for _ in range(mic_audio.SILENT_BLOCKS + 1):
+        next(recording)
+    assert capsys.readouterr().err == ''
+
+
+def test_live_without_sounddevice(monkeypatch) -> None:
+    monkeypatch.setitem(__import__('sys').modules, 'sounddevice', None)
+    with pytest.raises(ValueError, match='mic extra'):
+        mic_audio.live()
