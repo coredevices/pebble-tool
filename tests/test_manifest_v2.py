@@ -73,3 +73,29 @@ def test_nothing_to_do(tmp_path) -> None:
     assert manifest_v2.upgrade(pebble, manifest_v2.scan(project(tmp_path, "console.log('hi');"), pebble)) == []
     assert pebble == {}
 
+
+
+MIC_C = """
+#include <pebble.h>
+static void start(void) {
+  mic_capture_start((MicCaptureHandlers) { .data = on_audio, .stopped = on_stopped }, NULL);
+}
+"""
+
+
+def test_scan_finds_the_watchapp_starting_the_microphone(tmp_path) -> None:
+    (tmp_path / 'src' / 'c').mkdir(parents=True)
+    (tmp_path / 'src' / 'c' / 'main.c').write_text(MIC_C)
+    found = manifest_v2.scan(str(tmp_path), {})
+    assert found['WatchMicrophone'] == {'mic_capture_start()': os.path.join('src', 'c', 'main.c')}
+    pebble = {}
+    changes = manifest_v2.upgrade(pebble, found)
+    assert pebble['usesPermissions'] == ['WatchMicrophone']
+    assert changes == [('usesPermissions: WatchMicrophone',
+                        'mic_capture_start() in ' + os.path.join('src', 'c', 'main.c'))]
+
+
+def test_scan_ignores_microphone_checks_without_a_start(tmp_path) -> None:
+    (tmp_path / 'src' / 'c').mkdir(parents=True)
+    (tmp_path / 'src' / 'c' / 'main.c').write_text('bool on = mic_capture_is_active();')
+    assert manifest_v2.scan(str(tmp_path), {})['WatchMicrophone'] == {}

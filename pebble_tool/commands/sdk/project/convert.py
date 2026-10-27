@@ -114,7 +114,7 @@ class PblProjectConverter(SDKProjectCommand):
 
 
 class ManifestV2Converter(SDKProjectCommand):
-    """Converts a project to manifest version 2, declaring the permissions its JavaScript uses."""
+    """Converts a project to manifest version 2, declaring the permissions its code uses."""
     command = 'convert-manifest'
 
     def __call__(self, args):

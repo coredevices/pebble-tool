@@ -2,7 +2,7 @@
 
 A version 1 pbw is a legacy app to the phone app, whose PebbleKit JS may reach the whole internet,
 the phone's location and the timeline without declaring anything. A version 2 app gets only what
-its `usesPermissions` declares, so converting declares what the JavaScript visibly uses.
+its `usesPermissions` declares, so converting declares what the JavaScript and C visibly use.
 """
 
 import glob
@@ -15,12 +15,16 @@ INTERNET = 'Internet'
 LOCAL_NETWORK = 'LocalNetwork'
 LOCATION = 'Location'
 TIMELINE = 'Timeline'
+WATCH_MICROPHONE = 'WatchMicrophone'
 
 JS_GLOBS = ('src/pkjs/**/*.js', 'src/js/**/*.js', 'src/common/**/*.js')
+C_GLOBS = ('src/c/**/*.c', 'src/c/**/*.h')
 
 _URL = re.compile(r"""\b(?:https?|wss?)://[^\s'"`<>()\\]+""", re.IGNORECASE)
 _GEOLOCATION = re.compile(r'\bgeolocation\b')
 _TIMELINE_CALL = re.compile(r'\b(getTimelineToken|timelineSubscribe|timelineUnsubscribe|timelineSubscriptions)\b')
+# Only the watchapp's C code can start the microphone.
+_MICROPHONE_CALL = re.compile(r'\b(mic_capture_start|mic_stream_to_phone_start)\s*\(')
 # The phone app answers these itself when it emulates the timeline web API, behind Timeline.
 TIMELINE_API_HOSTS = ('timeline-api.rebble.io', 'timeline-api.getpebble.com')
 # Namespace URLs, not requests.
@@ -28,9 +32,9 @@ _NOT_REQUESTED_HOSTS = ('www.w3.org',)
 
 
 def scan(project_dir, pebble_info):
-    """What the project's PebbleKit JS (and config page) visibly uses, as
+    """What the project's PebbleKit JS (and config page) and watchapp visibly use, as
     {permission: {what: where}}: domains for Internet and LocalNetwork, calls for the rest."""
-    found = {INTERNET: {}, LOCAL_NETWORK: {}, LOCATION: {}, TIMELINE: {}}
+    found = {INTERNET: {}, LOCAL_NETWORK: {}, LOCATION: {}, TIMELINE: {}, WATCH_MICROPHONE: {}}
     for path in _js_files(project_dir):
         where = os.path.relpath(path, project_dir)
         with open(path, encoding='utf-8', errors='replace') as f:
@@ -41,6 +45,11 @@ def scan(project_dir, pebble_info):
             found[LOCATION].setdefault('navigator.geolocation', where)
         for match in _TIMELINE_CALL.finditer(text):
             found[TIMELINE].setdefault('Pebble.' + match.group(1), where)
+    for path in _files(project_dir, C_GLOBS):
+        where = os.path.relpath(path, project_dir)
+        with open(path, encoding='utf-8', errors='replace') as f:
+            for match in _MICROPHONE_CALL.finditer(f.read()):
+                found[WATCH_MICROPHONE].setdefault(match.group(1) + '()', where)
     config_page = pebble_info.get('configPage')
     if isinstance(config_page, str):
         _add_url(found, config_page, 'package.json configPage')
@@ -58,7 +67,7 @@ def upgrade(pebble_info, found):
     uses = list(pebble_info.get('usesPermissions') or [])
     names = {p if isinstance(p, str) else p.get('name') for p in uses
              if isinstance(p, str) or not p.get('plugin')}
-    for name in (LOCATION, TIMELINE, LOCAL_NETWORK):
+    for name in (LOCATION, TIMELINE, LOCAL_NETWORK, WATCH_MICROPHONE):
         if found[name] and name not in names:
             uses.append(name)
             what, where = next(iter(found[name].items()))
@@ -84,8 +93,12 @@ def upgrade(pebble_info, found):
 
 
 def _js_files(project_dir):
+    return _files(project_dir, JS_GLOBS)
+
+
+def _files(project_dir, globs):
     paths = set()
-    for pattern in JS_GLOBS:
+    for pattern in globs:
         paths.update(glob.glob(os.path.join(project_dir, pattern), recursive=True))
     return sorted(paths)
 
