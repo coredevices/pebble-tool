@@ -2,6 +2,7 @@
 __author__ = 'cherie'
 
 import datetime
+import itertools
 import json
 import time
 
@@ -23,7 +24,7 @@ from .base import PebbleCommand
 from ..exceptions import PebbleProjectException, ToolError
 from pebble_tool.sdk.emulator import ManagedEmulatorTransport
 from pebble_tool.sdk.project import PebbleProject
-from pebble_tool.util import phonesim
+from pebble_tool.util import mic_audio, phonesim
 from pebble_tool.util.browser import BrowserController
 
 
@@ -700,4 +701,100 @@ class EmuHeartRateCommand(PebbleCommand):
         parser.add_argument('bpm', type=int, help="Heart rate in beats per minute")
         parser.add_argument('--quality', choices=sorted(HRM_QUALITY.keys()), default='excellent',
                             help="Signal quality of the reading (default: excellent)")
+        return parser
+
+
+QEMU_PROTOCOL_MIC_AUDIO = 14
+# Blocks of 320 samples (20 ms), the watch microphone's frame, two to a QEMU message.
+MIC_BLOCKS_PER_MESSAGE = 2
+# How far ahead of real time to keep the watch's 250 ms queue, to ride out scheduling jitter.
+MIC_LEAD_SECONDS = 0.06
+
+
+class EmuMicCommand(PebbleCommand):
+    """Feeds audio to the emulated watch's microphone.
+
+    The watch only takes audio while an app captures or streams, and plays silence otherwise, so
+    start this before or while the app listens."""
+    command = 'emu-mic'
+    valid_connections = {'qemu', 'emulator'}
+
+    def __call__(self, args):
+        super(EmuMicCommand, self).__call__(args)
+        amplitude = int(32767 * args.volume / 100)
+        if args.file is not None:
+            try:
+                pcm = mic_audio.read_wav(args.file)
+            except (OSError, ValueError) as e:
+                raise ToolError(str(e))
+            source = mic_audio.blocks(pcm, args.loop)
+            what = args.file
+        elif args.noise:
+            source, what = mic_audio.noise(amplitude), "white noise"
+        else:
+            source, what = mic_audio.tone(args.tone, amplitude), "a {} Hz tone".format(args.tone)
+        if args.duration is not None:
+            source = itertools.islice(source, int(args.duration * mic_audio.SAMPLE_RATE / 320))
+        print("Playing {} into the watch microphone. Ctrl-C stops.".format(what))
+        try:
+            self._stream(source)
+        except KeyboardInterrupt:
+            pass
+
+    def _stream(self, source):
+        start = time.monotonic()
+        sent = 0
+        while True:
+            message = b''.join(itertools.islice(source, MIC_BLOCKS_PER_MESSAGE))
+            if not message:
+                return
+            send_raw_to_qemu(self.pebble.transport, QEMU_PROTOCOL_MIC_AUDIO, message)
+            sent += len(message) // 2
+            ahead = start + sent / mic_audio.SAMPLE_RATE - MIC_LEAD_SECONDS - time.monotonic()
+            if ahead > 0:
+                time.sleep(ahead)
+
+    @classmethod
+    def add_parser(cls, parser):
+        parser = super(EmuMicCommand, cls).add_parser(parser)
+        source = parser.add_mutually_exclusive_group()
+        source.add_argument('--file', help="A WAV file to play; any rate and channel count is converted.")
+        source.add_argument('--tone', type=float, default=440, metavar='HZ',
+                            help="Play a sine tone at this frequency (the default, at 440 Hz).")
+        source.add_argument('--noise', action='store_true', help="Play white noise.")
+        parser.add_argument('--loop', action='store_true', help="Repeat the WAV file until stopped.")
+        parser.add_argument('--duration', type=float, metavar='SECONDS',
+                            help="Stop after this long (default: the end of the file, or Ctrl-C).")
+        parser.add_argument('--volume', type=float, default=25, metavar='PERCENT',
+                            help="Amplitude of the tone or noise, as a percentage of full scale (default: 25).")
+        return parser
+
+
+class EmuPermissionCommand(PebbleCommand):
+    """Grants or denies an app a permission in the emulator, as its user would in the phone app.
+
+    The emulator grants a permission to every app that declares it in usesPermissions, as if the
+    user had allowed it; denying it lets you try out the refusal, or a revocation while the app
+    uses it."""
+    command = 'emu-permission'
+    valid_connections = {'emulator'}
+    PERMISSION_OPCODE = 0x0f
+
+    def __call__(self, args):
+        super(EmuPermissionCommand, self).__call__(args)
+        request = {'permission': args.permission, 'uuid': args.uuid,
+                   'state': 'grant' if args.grant else 'deny' if args.deny else 'reset' if args.reset else None}
+        result = json.loads(phonesim.request(self.pebble.transport, self.PERMISSION_OPCODE,
+                                             json.dumps(request).encode('utf-8')))
+        print("{}: {}.".format(args.permission, result['reason']))
+
+    @classmethod
+    def add_parser(cls, parser):
+        parser = super(EmuPermissionCommand, cls).add_parser(parser)
+        parser.add_argument('permission', choices=['WatchMicrophone'], help="The permission.")
+        state = parser.add_mutually_exclusive_group()
+        state.add_argument('--grant', action='store_true', help="Allow it (undoes --deny).")
+        state.add_argument('--deny', action='store_true', help="Deny it, as the user can in the phone app.")
+        state.add_argument('--reset', action='store_true', help="Back to the emulator's default.")
+        parser.add_argument('--uuid', help="The app's UUID (default: the running app).")
         return parser
