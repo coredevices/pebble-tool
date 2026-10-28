@@ -57,8 +57,12 @@ class BuildCommand(SDKProjectCommand):
                     raise ToolError("This is a Moddable project, but the currently active SDK does not have Moddable tools. "
                                     "Please install an SDK with Moddable support to build this project.")
                 self.run_moddable_prebuild(debug=args.debug)
-            self._waf("configure", extra_env=extra_env, args=waf)
-            self._waf("build", args=waf)
+            if self.uses_cmake:
+                self._cmake_configure(debug=args.debug, args=waf)
+                self._cmake(['--build', os.path.join(self.project.project_dir, 'build')])
+            else:
+                self._waf("configure", extra_env=extra_env, args=waf)
+                self._waf("build", args=waf)
         except subprocess.CalledProcessError:
             duration = time.time() - start_time
             post_event("app_build_failed", build_time=duration)
@@ -157,7 +161,8 @@ class BuildCommand(SDKProjectCommand):
         parser = super(BuildCommand, cls).add_parser(parser)
         parser.add_argument('--debug', action='store_true', help="Build without optimisations for easier debugging. "
                                                                  "This may cause apps to run slower or not fit at all.")
-        parser.add_argument('args', nargs=argparse.REMAINDER, help="Extra arguments to pass to waf.")
+        parser.add_argument('args', nargs=argparse.REMAINDER,
+                            help="Extra arguments to pass to waf, or to CMake when configuring.")
         return parser
 
 
@@ -166,6 +171,9 @@ class CleanCommand(SDKProjectCommand):
 
     def __call__(self, args):
         super(CleanCommand, self).__call__(args)
+        if self.uses_cmake:
+            shutil.rmtree(os.path.join(self.project.project_dir, 'build'), ignore_errors=True)
+            return
         try:
             self._waf("distclean")
         except subprocess.CalledProcessError:
