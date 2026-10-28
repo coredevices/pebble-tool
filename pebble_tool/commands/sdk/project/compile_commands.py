@@ -114,7 +114,13 @@ class CompileCommandsCommand(SDKProjectCommand):
         # in build/<platform>/src. These only exist after a build, but harmless if absent.
         build = os.path.join(project_dir, 'build')
         dirs.append(os.path.join(build, 'include'))
+        # waf looks for relative INCLUDES in both the source and the build tree: the project's
+        # own (e.g. src/mrsh/include from its wscript) and generated ones (the platform's
+        # BUILD_DIR, and its src/ for resource_ids.auto.h).
         for inc in env.get('INCLUDES', []):
+            src_dir = os.path.normpath(os.path.join(project_dir, inc))
+            if os.path.isdir(src_dir) and src_dir not in dirs:
+                dirs.append(src_dir)
             dirs.append(os.path.join(build, inc))
             dirs.append(os.path.join(build, inc, 'src'))
         return dirs
