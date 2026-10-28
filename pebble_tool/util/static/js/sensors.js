@@ -104,14 +104,29 @@ pebble.on('open', function() {
     document.getElementById('accel-y-slider').addEventListener("input", updateAccelFromManualInput);
     document.getElementById('accel-z-slider').addEventListener("input", updateAccelFromManualInput);
 
-    document.getElementById('use_sensors').addEventListener("change", function() {
+    var use_sensors = document.getElementById('use_sensors');
+    // Browsers only give secure (HTTPS) pages motion sensors, and this page is plain HTTP, so most phones
+    // won't. The compass and sliders work regardless.
+    var has_sensors = window.isSecureContext !== false && !!(window.DeviceMotionEvent && window.DeviceOrientationEvent);
+    var no_sensors = function(why) {
+        use_sensors.checked = false;
+        use_sensors.disabled = true;
+        document.getElementById('state').innerHTML = "Connected: " + why + " Drag the compass and sliders instead.";
+    };
+    use_sensors.addEventListener("change", function() {
+        // iOS asks the user before handing over motion sensors.
+        if(use_sensors.checked && typeof DeviceMotionEvent.requestPermission === 'function') {
+            DeviceMotionEvent.requestPermission().then(function(state) {
+                if(state !== 'granted') { no_sensors("this browser won't share its motion sensors."); }
+            }).catch(function() { no_sensors("this browser won't share its motion sensors."); });
+        }
     });
 
-    if(window.DeviceMotionEvent && window.DeviceOrientationEvent) {
+    document.getElementById('stuff').style.display = "block";
+    if(has_sensors) {
         document.getElementById('state').innerHTML = "Transmitting";
-        document.getElementById('stuff').style.display = "block";
     } else {
-        document.getElementById('state').innerHTML = "Not Supported";
+        no_sensors("this browser only shares motion sensors with HTTPS pages.");
     }
 });
 
