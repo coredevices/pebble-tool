@@ -45,7 +45,11 @@ class BaseCommand(with_metaclass(SelfRegisteringCommand)):
             epilog = None
         parser = parser.add_parser(cls.command, parents=cls._shared_parser(), help=cls.__doc__, epilog=epilog,
                                    formatter_class=argparse.RawDescriptionHelpFormatter)
-        parser.set_defaults(func=lambda x: cls()(x))
+        if cls.has_subcommands:
+            # Without a subcommand there's nothing to run: show what there is.
+            parser.set_defaults(func=lambda x: cls()(x) if getattr(x, 'sub_func', None) else parser.print_help())
+        else:
+            parser.set_defaults(func=lambda x: cls()(x))
         return parser
 
     @classmethod
