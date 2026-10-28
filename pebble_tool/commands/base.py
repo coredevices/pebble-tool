@@ -199,6 +199,17 @@ class PebbleTransportConfiguration(with_metaclass(SelfRegisteringTransportConfig
         pass
 
 
+def set_host_time(connection):
+    """Set the watch to this computer's time and timezone."""
+    if connection.firmware_version.major < 3:
+        return
+    ts = time.time()
+    tz_offset = -time.altzone if time.localtime(ts).tm_isdst and time.daylight else -time.timezone
+    tz_offset_minutes = tz_offset // 60
+    tz_name = "UTC%+d" % (tz_offset_minutes / 60)
+    connection.send_packet(TimeMessage(message=SetUTC(unix_time=int(ts), utc_offset=tz_offset_minutes, tz_name=tz_name)))
+
+
 class PebbleTransportSerial(PebbleTransportConfiguration):
     transport_class = SerialTransport
     env_var = 'PEBBLE_BT_SERIAL'
@@ -310,13 +321,10 @@ class PebbleTransportQemu(PebbleTransportConfiguration):
 
     @classmethod
     def post_connect(cls, connection):
-        # Set timezone when using pypkjs (same as emulator transport)
-        if cls._using_pypkjs and connection.firmware_version.major >= 3:
-            ts = time.time()
-            tz_offset = -time.altzone if time.localtime(ts).tm_isdst and time.daylight else -time.timezone
-            tz_offset_minutes = tz_offset // 60
-            tz_name = "UTC%+d" % (tz_offset_minutes / 60)
-            connection.send_packet(TimeMessage(message=SetUTC(unix_time=int(ts), utc_offset=tz_offset_minutes, tz_name=tz_name)))
+        # Set the timezone when this command started pypkjs (as the emulator transport does), not on
+        # every connection: that would undo `pebble emu-set-time`.
+        if getattr(connection.transport, 'spawned_pypkjs', False):
+            set_host_time(connection)
 
     @classmethod
     def add_argument_handler(cls, group, parser):
@@ -387,13 +395,10 @@ class PebbleTransportEmulator(PebbleTransportConfiguration):
 
     @classmethod
     def post_connect(cls, connection):
-        # Make sure the timezone is set usefully.
-        if connection.firmware_version.major >= 3:
-            ts = time.time()
-            tz_offset = -time.altzone if time.localtime(ts).tm_isdst and time.daylight else -time.timezone
-            tz_offset_minutes = tz_offset // 60
-            tz_name = "UTC%+d" % (tz_offset_minutes / 60)
-            connection.send_packet(TimeMessage(message=SetUTC(unix_time=int(ts), utc_offset=tz_offset_minutes, tz_name=tz_name)))
+        # Make sure the timezone is set usefully when the emulator starts, and only then: later
+        # commands would undo `pebble emu-set-time`.
+        if getattr(connection.transport, 'spawned_qemu', False):
+            set_host_time(connection)
 
     @classmethod
     def add_argument_handler(cls, group, parser):

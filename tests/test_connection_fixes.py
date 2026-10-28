@@ -29,3 +29,33 @@ def test_command_without_subcommand_prints_its_help(capsys) -> None:
     args.func(args)
     out = capsys.readouterr().out
     assert out.startswith('usage:') and 'install' in out
+
+
+class Connection:
+    def __init__(self, transport):
+        self.transport = transport
+        self.firmware_version = SimpleNamespace(major=4)
+        self.sent = []
+
+    def send_packet(self, packet):
+        self.sent.append(packet)
+
+
+@pytest.mark.parametrize('spawned', [True, False])
+def test_emulator_gets_the_host_time_only_when_launched(spawned) -> None:
+    connection = Connection(SimpleNamespace(spawned_qemu=spawned))
+    base.PebbleTransportEmulator.post_connect(connection)
+    assert len(connection.sent) == (1 if spawned else 0)
+
+
+@pytest.mark.parametrize('spawned', [True, False])
+def test_qemu_gets_the_host_time_only_when_pypkjs_is_launched(spawned) -> None:
+    connection = Connection(SimpleNamespace(spawned_pypkjs=spawned))
+    base.PebbleTransportQemu.post_connect(connection)
+    assert len(connection.sent) == (1 if spawned else 0)
+
+
+def test_qemu_without_pypkjs_keeps_its_time() -> None:
+    connection = Connection(SimpleNamespace())
+    base.PebbleTransportQemu.post_connect(connection)
+    assert connection.sent == []

@@ -129,6 +129,8 @@ class ManagedEmulatorTransport(WebsocketTransport):
         self.vnc_enabled = vnc_enabled
         self.sunlight_enabled = sunlight_enabled
         self.websockify_pid = None
+        #: Whether connecting launched the emulator, rather than finding it running.
+        self.spawned_qemu = False
         self._find_ports()
         super(ManagedEmulatorTransport, self).__init__('ws://localhost:{}/'.format(self.pypkjs_port))
 
@@ -247,6 +249,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
         if self.qemu_pid is None:
             logger.info("Spawning QEMU.")
             self._spawn_qemu()
+            self.spawned_qemu = True
         else:
             logger.info("QEMU is already running.")
 
@@ -656,6 +659,11 @@ class ExternalQemuTransport(WebsocketTransport):
             self.pypkjs_port = self._choose_port()
 
         super(ExternalQemuTransport, self).__init__('ws://localhost:{}/'.format(self.pypkjs_port))
+
+    @property
+    def spawned_pypkjs(self):
+        """Whether connecting launched pypkjs, rather than reusing one."""
+        return self._spawned_pypkjs
 
     def connect(self):
         if self.pypkjs_pid is None or not self._is_pid_running(self.pypkjs_pid):
