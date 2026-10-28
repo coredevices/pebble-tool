@@ -1,5 +1,5 @@
 """
-Tests for projects that build with CMake: build and clean.
+Tests for projects that build with CMake: template choice, build and clean.
 """
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import types
 
 import pytest
 
+from pebble_tool.commands.sdk import create
 from pebble_tool.commands.sdk.project import SDKProjectCommand
 from pebble_tool.commands.sdk.project.build import BuildCommand, CleanCommand
 from pebble_tool.commands.sdk.project.compile_commands import CompileCommandsCommand
@@ -85,3 +86,19 @@ def test_compile_commands_points_at_cmake(project):
     command, args = _parse(CompileCommandsCommand, [])
     with pytest.raises(ToolError, match='Unsupported for CMake projects'):
         command(args)
+
+
+@pytest.mark.parametrize('has_cmake, build_file', [(True, 'CMakeLists.txt'), (False, 'wscript')])
+def test_new_project_builds_with_what_the_sdk_has(tmp_path, monkeypatch, has_cmake, build_file):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(create.NewProjectCommand, 'get_sdk_path', lambda self: '/sdk/sdk-core')
+    monkeypatch.setattr(create, 'sdk_has_cmake', lambda: has_cmake)
+    monkeypatch.setattr(create, 'sdk_version', lambda: '4.33.1')
+    monkeypatch.setattr(create, 'post_event', lambda *a, **k: None)
+    monkeypatch.setattr('pebble_tool.commands.base.BaseCommand.__call__', lambda self, args: None)
+    command, args = _parse(create.NewProjectCommand, ['face'])
+    command.sdk = None
+    command(args)
+
+    files = set(os.listdir(tmp_path / 'face'))
+    assert files & {'CMakeLists.txt', 'wscript'} == {build_file}

@@ -11,7 +11,7 @@ from uuid import uuid4
 from six import iteritems, string_types
 
 from . import SDKCommand
-from pebble_tool.sdk import SDK_VERSION, sdk_version, has_rocky_tools, has_moddable_tools
+from pebble_tool.sdk import SDK_VERSION, sdk_version, has_rocky_tools, has_moddable_tools, sdk_has_cmake
 from pebble_tool.exceptions import ToolError
 from pebble_tool.util.analytics import post_event
 from pebble_tool.util.versions import version_to_key
@@ -180,6 +180,10 @@ class NewProjectCommand(SDKCommand):
         if version_number[:5] != (0, 0, 0, 0, 0) and \
            version_number < (3, 13, 0):
             options.append('appinfo')
+
+        if options[0] != 'rocky':
+            # Projects build with CMake on the SDKs that have it, and with waf on older ones.
+            options.append('cmake' if sdk_has_cmake() else 'waf')
 
         with open(extant_path(os.path.join(x, "templates.json") for x in template_paths)) as f:
             template_layout = json.load(f)

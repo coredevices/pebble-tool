@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import os
 
+import pytest
+
 from pebble_tool.commands.emucontrol import EmuAppConfigCommand
 from pebble_tool.commands.sdk.create import _copy_from_template
 from pebble_tool.sdk.project import NpmProject
@@ -13,18 +15,20 @@ from pebble_tool.sdk.project import NpmProject
 TEMPLATES = os.path.join(os.path.dirname(__file__), '..', 'pebble_tool', 'sdk', 'templates')
 
 
-def test_plugin_template(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize('build_system, build_file', [('cmake', 'CMakeLists.txt'), ('waf', 'wscript')])
+def test_plugin_template(tmp_path, monkeypatch, build_system, build_file) -> None:
     monkeypatch.chdir(tmp_path)
     with open(os.path.join(TEMPLATES, 'templates.json')) as f:
         layout = json.load(f)
 
-    _copy_from_template(layout, TEMPLATES, 'counter', ['plugin'])
+    _copy_from_template(layout, TEMPLATES, 'counter', ['plugin', build_system])
 
     with open(tmp_path / 'counter' / 'package.json') as f:
         pebble = json.load(f)['pebble']
     assert pebble['projectType'] == 'plugin'
     assert (tmp_path / 'counter' / pebble['plugin']['script']).is_file()
-    assert (tmp_path / 'counter' / 'wscript').is_file()
+    assert sorted(f for f in os.listdir(tmp_path / 'counter') if f in ('CMakeLists.txt', 'wscript')) == \
+        [build_file]
     # No watchapp: nothing for the C build to pick up.
     assert not (tmp_path / 'counter' / 'src' / 'c').exists()
 
@@ -36,8 +40,8 @@ def test_emu_app_config_opens_a_plugin_projects_own_page(tmp_path, monkeypatch) 
     monkeypatch.chdir(tmp_path)
     with open(os.path.join(TEMPLATES, 'templates.json')) as f:
         layout = json.load(f)
-    _copy_from_template(layout, TEMPLATES, 'counter', ['plugin'])
-    _copy_from_template(layout, TEMPLATES, 'face', ['app'])
+    _copy_from_template(layout, TEMPLATES, 'counter', ['plugin', 'cmake'])
+    _copy_from_template(layout, TEMPLATES, 'face', ['app', 'cmake'])
 
     monkeypatch.chdir(tmp_path / 'counter')
     with open('package.json') as f:

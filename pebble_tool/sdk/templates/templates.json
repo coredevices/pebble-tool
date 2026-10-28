@@ -17,19 +17,23 @@
             "src/embeddedjs/manifest.json": "moddable/manifest.json",
             "src/pkjs/index.js": "moddable/index.js",
             "package.json": "moddable/package.json",
-            "wscript": "moddable/wscript",
             "README.md": "moddable/README.md"
         },
         "ai": {
             "AGENTS.md": "app/ai.md",
             "CLAUDE.md": "app/claude.md",
             ".cursor/rules/pebble.mdc": "app/ai.md"
+        },
+        "waf": {
+            "wscript": "moddable/wscript"
+        },
+        "cmake": {
+            "CMakeLists.txt": "app/CMakeLists.txt"
         }
     },
     "app": {
         "default": {
             "src/c/${project_name}.c": "app/main.c",
-            "wscript": "app/wscript",
             "package.json": "app/package.json",
             "README.md": "app/README.md",
             "resources": null
@@ -47,14 +51,25 @@
             "AGENTS.md": "app/ai.md",
             "CLAUDE.md": "app/claude.md",
             ".cursor/rules/pebble.mdc": "app/ai.md"
+        },
+        "waf": {
+            "wscript": "app/wscript"
+        },
+        "cmake": {
+            "CMakeLists.txt": "app/CMakeLists.txt"
         }
     },
     "plugin": {
         "default": {
             "src/plugin/index.js": "plugin/index.js",
-            "wscript": "plugin/wscript",
             "package.json": "plugin/package.json",
             "README.md": "plugin/README.md"
+        },
+        "waf": {
+            "wscript": "plugin/wscript"
+        },
+        "cmake": {
+            "CMakeLists.txt": "plugin/CMakeLists.txt"
         }
     },
     "lib": {

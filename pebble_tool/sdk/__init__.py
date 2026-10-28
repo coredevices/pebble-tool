@@ -25,6 +25,11 @@ def sdk_path():
 sdk_manager = SDKManager()
 
 
+def sdk_has_cmake():
+    """Whether the current SDK can build projects with CMake."""
+    return os.path.exists(os.path.join(sdk_path(), 'pebble', 'cmake', 'PebbleSDKConfig.cmake'))
+
+
 def has_rocky_tools(version=None):
     """Check if the SDK has Rocky.js tools available.
 
