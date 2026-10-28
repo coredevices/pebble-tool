@@ -65,3 +65,31 @@ def test_silent_serial_port_explains_bluetooth_classic() -> None:
     message = base.PebbleTransportSerial.no_answer_message(SimpleNamespace(serial='/dev/cu.PebbleTimeA17A'))
     assert '/dev/cu.PebbleTimeA17A' in message
     assert 'Bluetooth Classic' in message and '--phone' in message
+
+
+def make_pbw(tmp_path, platforms, name='app.pbw'):
+    path = tmp_path / name
+    with zipfile.ZipFile(path, 'w') as z:
+        z.writestr('appinfo.json', json.dumps({'uuid': '6b1c3a52-0d4e-4f5a-9c33-2f0e7a1d8b40'}))
+        for platform in platforms:
+            z.writestr('{}/manifest.json'.format(platform), json.dumps({'manifestVersion': 2}))
+    return str(path)
+
+
+EMERY_WATCH = SimpleNamespace(watch_info=SimpleNamespace(running=SimpleNamespace(hardware_platform=EMERY_EMULATOR)),
+                              watch_platform='emery')
+
+
+def test_install_refuses_a_pbw_without_a_build_for_the_watch(tmp_path) -> None:
+    with pytest.raises(ToolError) as e:
+        ToolAppInstaller._check_platform(EMERY_WATCH, make_pbw(tmp_path, ['aplite', 'chalk']))
+    assert str(e.value) == ('This pbw has no emery build (it has aplite, chalk). Add "emery" to targetPlatforms '
+                            'in package.json and rebuild.')
+
+
+def test_install_takes_a_pbw_with_a_build_for_the_watch(tmp_path) -> None:
+    ToolAppInstaller._check_platform(EMERY_WATCH, make_pbw(tmp_path, ['emery', 'gabbro']))
+
+
+def test_install_leaves_a_plugin_only_pbw_to_the_phone(tmp_path) -> None:
+    ToolAppInstaller._check_platform(EMERY_WATCH, make_pbw(tmp_path, []))

@@ -8,6 +8,7 @@ from libpebble2.communication.transports.websocket import WebsocketTransport, Me
 from libpebble2.communication.transports.websocket.protocol import WebSocketInstallBundle, WebSocketInstallStatus
 from libpebble2.exceptions import TimeoutError
 from libpebble2.services.install import AppInstaller
+from libpebble2.util.bundle import PebbleBundle
 
 from .base import PebbleCommand
 from ..util import is_debug_build
@@ -145,7 +146,24 @@ class ToolAppInstaller(object):
     def _handle_pp_progress(self, sent, total_sent, total_size):
         self.progress_bar.update(total_sent)
 
+    @staticmethod
+    def _check_platform(pebble, pbw):
+        """Refuse a pbw with nothing that runs on this watch, which the phone would only fail to install
+        without saying why."""
+        bundle = PebbleBundle(pbw, hardware=pebble.watch_info.running.hardware_platform)
+        names = bundle.zip.namelist()
+        built = sorted(path[:-len('/' + PebbleBundle.MANIFEST_FILENAME)] for path in names
+                       if path.endswith('/' + PebbleBundle.MANIFEST_FILENAME))
+        if not built and PebbleBundle.MANIFEST_FILENAME not in names:
+            return  # Nothing for the watch, e.g. a plugin-only pbw.
+        if not bundle.should_permit_install():
+            platform = pebble.watch_platform
+            raise ToolError("This pbw has no {platform} build{has}. Add \"{platform}\" to targetPlatforms in "
+                            "package.json and rebuild.".format(
+                                platform=platform, has=" (it has {})".format(", ".join(built)) if built else ""))
+
     def _install_via_websocket(self, pebble, pbw):
+        self._check_platform(pebble, pbw)
         with open(pbw, 'rb') as f:
             if not self.quiet:
                 print("Installing app...")
