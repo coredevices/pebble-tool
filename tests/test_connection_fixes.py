@@ -93,3 +93,21 @@ def test_install_takes_a_pbw_with_a_build_for_the_watch(tmp_path) -> None:
 
 def test_install_leaves_a_plugin_only_pbw_to_the_phone(tmp_path) -> None:
     ToolAppInstaller._check_platform(EMERY_WATCH, make_pbw(tmp_path, []))
+
+
+def test_long_config_pages_open_from_a_file_and_are_cleaned_up(monkeypatch, tmp_path) -> None:
+    opened = []
+    monkeypatch.setattr(browser_module.os.path, 'expanduser', lambda path: str(tmp_path))
+    monkeypatch.setattr(browser_module.webbrowser, 'open_new', opened.append)
+
+    def serve_page(self, port, callback):
+        page = opened[0][len('file://'):]
+        opened.append(open(page).read())
+
+    monkeypatch.setattr(BrowserController, 'serve_page', serve_page)
+    # A Clay page in a URL far longer than a command line may be.
+    url = 'https://config.example.com/clay#' + 'x' * 300000 + '&a="b"'
+    BrowserController().open_config_page(url, lambda query: None)
+    assert opened[0].startswith('file://') and len(opened[0]) < 1000
+    assert 'x' * 300000 in opened[1] and '&amp;a=&quot;b&quot;' in opened[1]
+    assert os.listdir(str(tmp_path)) == []

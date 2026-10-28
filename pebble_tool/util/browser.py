@@ -1,10 +1,10 @@
 
 
 import contextlib
+import html
 import logging
 import os
 import socket
-import sys
 import tempfile
 import time
 from urllib.request import urlopen
@@ -29,47 +29,40 @@ class BrowserController(object):
         # where the config page should send submitted form data
         return_url = 'http://localhost:{}/close?'.format(port)
 
-        # NamedTemporaryFile's delete_on_close parameter is only available since python3.12
-        is_tempfile_delete_on_close_available = sys.version_info >= (3, 12)
-
-        if url.startswith('file:') or not is_tempfile_delete_on_close_available:
+        if url.startswith('file:'):
             # TODO: several browsers strip searchParams when opening local file URLs, so this may not work
             url = self.url_append_params(url, {'return_to': return_url})
 
             webbrowser.open_new(url)
             self.serve_page(port, callback)
-        else:
-            # Firefox's URL argument length limit can quickly be exceeded by a Clay config URL
-            # and many browsers have trouble directly opening data URIs for a fully local config page.
-            # So instead of opening the URL directly, write it to a temporary file.
-            # Default Ubuntu firefox installation can't access /tmp
-            # so place the temporary file in the user's home directory.
-            with tempfile.NamedTemporaryFile(dir=os.path.expanduser("~"),
-                                             delete_on_close=False,
-                                             prefix="pebble-tool-emu-app-config-",
-                                             suffix=".html") as temp:
+            return
 
+        # A Clay config URL quickly exceeds browsers' URL limits and the system's argument limit (it is
+        # passed on the browser's command line), and many browsers won't open data URIs directly. So
+        # write a page to a file and open that instead. Default Ubuntu firefox can't read /tmp, so
+        # put it in the user's home directory.
+        fd, path = tempfile.mkstemp(dir=os.path.expanduser("~"), prefix="pebble-tool-emu-app-config-",
+                                    suffix=".html")
+        try:
+            with os.fdopen(fd, 'wb') as f:
                 if url.startswith('data:'):  # a data URI encoding the config page's HTML
-                    # decode the data URI and write the resulting HTML
                     with urlopen(url) as response:
                         data = response.read()
-                        # several browsers strip searchParams when opening local file URLs
-                        # so append to the HTML a script to self-refresh with added searchParam
-                        data += (f'<script>if(!location.search){{location.search="?return_to={return_url}"}}</script>'
-                                 .encode("utf-8"))
-                        with open(temp.name, mode="wb") as f:
-                            f.write(data)
-
+                    # several browsers strip searchParams when opening local file URLs
+                    # so append to the HTML a script to self-refresh with added searchParam
+                    data += (f'<script>if(!location.search){{location.search="?return_to={return_url}"}}</script>'
+                             .encode("utf-8"))
+                    f.write(data)
                 else:  # an HTTP URL. This is the path that web-hosted and Clay configs take.
                     # several browsers strip searchParams when opening local file URLs
                     # so write an HTML page which self-refreshes into the url with added searchParam
                     url = self.url_append_params(url, {'return_to': return_url})
-                    with open(temp.name, mode="w") as f:
-                        f.write(f'<head><meta http-equiv="refresh" content="0;URL={url}"></head>')
-
-                tempfile_url = f"file://{temp.name}"
-                webbrowser.open_new(tempfile_url)
-                self.serve_page(port, callback)
+                    f.write(f'<head><meta http-equiv="refresh" content="0;URL={html.escape(url)}"></head>'
+                            .encode("utf-8"))
+            webbrowser.open_new(f"file://{path}")
+            self.serve_page(port, callback)
+        finally:
+            os.remove(path)
 
     def serve_page(self, port, callback):
         # This is an array so AppConfigHandler doesn't create an instance variable when trying to set the state to False
