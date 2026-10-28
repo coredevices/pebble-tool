@@ -21,6 +21,11 @@ class SDKProjectCommand(SDKCommand):
         return os.path.join(self.get_sdk_path(), 'pebble', 'waf')
 
     def _waf(self, command, extra_env=None, args=None):
+        command, env = self._waf_invocation(command, extra_env, args)
+        subprocess.check_call(command, env=env)
+
+    def _waf_invocation(self, command, extra_env=None, args=None):
+        """The command line and environment that run `waf <command>` with the SDK's venv."""
         if args is None:
             args = []
         else:
@@ -39,7 +44,7 @@ class SDKProjectCommand(SDKCommand):
         env['NOCLIMB'] = "1"  # This prevents waf from climbing into parent directories and executing commands
         if extra_env is not None:
             env.update(extra_env)
-        subprocess.check_call(command, env=env)
+        return command, env
 
     def __call__(self, args):
         super(SDKProjectCommand, self).__call__(args)

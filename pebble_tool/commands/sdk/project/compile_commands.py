@@ -3,6 +3,8 @@ __author__ = 'jplexer'
 
 import json
 import os
+import re
+import subprocess
 
 from pebble_tool.commands.sdk.project import SDKProjectCommand
 from pebble_tool.exceptions import ToolError
@@ -18,10 +20,55 @@ class CompileCommandsCommand(SDKProjectCommand):
         platform = self._choose_platform(args.platform)
         project_dir = os.path.abspath(self.project.project_dir)
 
+        # Like `pebble build`, configure every time so the flags follow the wscript as it is now.
+        try:
+            self._waf("configure")
+        except subprocess.CalledProcessError:
+            raise ToolError("Couldn't configure the project.")
+        db = self._database_from_build(platform)
+        if db is None:
+            print("This SDK can't report the commands its build runs (that needs an SDK newer than "
+                  "4.33.1), so they're reconstructed instead: only C files under src/ and "
+                  "worker_src/, with the flags and include dirs the project configured.")
+            db = self._reconstruct_database(project_dir, platform)
+            if not db:
+                print("No C source files found under src/ or worker_src/; nothing to do.")
+                return
+
+        out_path = os.path.join(project_dir, 'compile_commands.json')
+        with open(out_path, 'w') as f:
+            json.dump(db, f, indent=2)
+            f.write('\n')
+
+        print("Wrote {} ({} file{}, platform '{}').".format(
+            out_path, len(db), '' if len(db) == 1 else 's', platform))
+
+    def _database_from_build(self, platform):
+        """The compile commands the app build runs, as the SDK's `waf clangdb` records them.
+
+        Returns None if the SDK has no such command.
+        """
+        if not self._sdk_has_clangdb():
+            return None
+        try:
+            self._waf("clangdb", args=["--clangdb-platform=" + platform])
+        except subprocess.CalledProcessError:
+            raise ToolError("Couldn't get the compile commands from the build.")
+        with open(os.path.join(self.project.project_dir, 'build', 'compile_commands.json')) as f:
+            return json.load(f)
+
+    def _sdk_has_clangdb(self):
+        # waf lists every command it has in its help, whatever its version.
+        command, env = self._waf_invocation("--help")
+        result = subprocess.run(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True)
+        return re.search(r'^\s+clangdb\s*:', result.stdout, re.MULTILINE) is not None
+
+    def _reconstruct_database(self, project_dir, platform):
+        """Rebuild the compile commands by hand from the configured flags, for older SDKs."""
         sources = self._find_sources()
         if not sources:
-            print("No C source files found under src/ or worker_src/; nothing to do.")
-            return
+            return []
 
         env = self._waf_env(platform)
         define_flag = env.get('DEFINES_ST', '-D%s')
@@ -41,14 +88,7 @@ class CompileCommandsCommand(SDKProjectCommand):
                 "arguments": base_args + ["-c", abs_src,
                                           "-o", os.path.join('build', platform, '{}.o'.format(src))],
             })
-
-        out_path = os.path.join(project_dir, 'compile_commands.json')
-        with open(out_path, 'w') as f:
-            json.dump(db, f, indent=2)
-            f.write('\n')
-
-        print("Wrote {} ({} file{}, platform '{}').".format(
-            out_path, len(db), '' if len(db) == 1 else 's', platform))
+        return db
 
     def _waf_env(self, platform):
         """Read the build flags the SDK's own waf toolchain resolved for this platform.
@@ -58,13 +98,10 @@ class CompileCommandsCommand(SDKProjectCommand):
         rather than reconstructing them by hand. That keeps us in lockstep with whatever
         the active SDK actually compiles with (e.g. the version-conditional
         -D_TIME_H_/-Dtime_t=long flags newer SDKs add, the RELEASE define, the warning
-        set). We run configure if that cache isn't present yet.
+        set, and whatever the project's wscript appended).
         """
         cache = os.path.join(self.project.project_dir, 'build', 'c4che',
                              '{}_cache.py'.format(platform))
-        if not os.path.exists(cache):
-            print("Configuring to read the SDK's build flags...")
-            self._waf("configure")
         if not os.path.exists(cache):
             raise ToolError("Couldn't find build flags for platform '{}' (expected {}). "
                             "Try 'pebble build' first.".format(platform, cache))
