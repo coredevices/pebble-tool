@@ -59,3 +59,9 @@ def test_qemu_without_pypkjs_keeps_its_time() -> None:
     connection = Connection(SimpleNamespace())
     base.PebbleTransportQemu.post_connect(connection)
     assert connection.sent == []
+
+
+def test_silent_serial_port_explains_bluetooth_classic() -> None:
+    message = base.PebbleTransportSerial.no_answer_message(SimpleNamespace(serial='/dev/cu.PebbleTimeA17A'))
+    assert '/dev/cu.PebbleTimeA17A' in message
+    assert 'Bluetooth Classic' in message and '--phone' in message

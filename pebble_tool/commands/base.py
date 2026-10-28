@@ -11,7 +11,7 @@ from libpebble2.communication import PebbleConnection
 from libpebble2.communication.transports.qemu import QemuTransport
 from libpebble2.communication.transports.websocket import WebsocketTransport
 from libpebble2.communication.transports.serial import SerialTransport
-from libpebble2.exceptions import ConnectionError
+from libpebble2.exceptions import ConnectionError, TimeoutError as PebbleTimeoutError
 from libpebble2.protocol.system import TimeMessage, SetUTC
 
 from pebble_tool.exceptions import ToolError
@@ -130,7 +130,10 @@ class PebbleCommand(BaseCommand):
         transport = handler_impl.get_transport(args)
         connection = PebbleConnection(transport, **self._get_debug_args())
         connection.connect()
-        connection.run_async()
+        try:
+            connection.run_async()
+        except PebbleTimeoutError:
+            raise ToolError(handler_impl.no_answer_message(args))
         handler_impl.post_connect(connection)
         return connection
 
@@ -198,6 +201,11 @@ class PebbleTransportConfiguration(with_metaclass(SelfRegisteringTransportConfig
     def post_connect(cls, connection):
         pass
 
+    @classmethod
+    def no_answer_message(cls, args):
+        """What to tell the user when the watch never answers."""
+        return "Connected, but the watch didn't answer."
+
 
 def set_host_time(connection):
     """Set the watch to this computer's time and timezone."""
@@ -217,7 +225,17 @@ class PebbleTransportSerial(PebbleTransportConfiguration):
 
     @classmethod
     def add_argument_handler(cls, group, parser):
-        group.add_argument('--serial', type=str, help="Connected directly, given a path to a serial device.")
+        group.add_argument('--serial', type=str,
+                           help="Connected directly, given the path to the serial port of a watch paired over "
+                                "Bluetooth Classic: original Pebbles, Pebble Time, Time Steel and Time Round "
+                                "only.")
+
+    @classmethod
+    def no_answer_message(cls, args):
+        return ("The watch didn't answer on {}. --serial only reaches watches paired over Bluetooth Classic "
+                "(original Pebbles, Pebble Time, Time Steel and Time Round). Newer watches, such as the "
+                "Pebble 2 Duo and Pebble Time 2, are Bluetooth LE only: install through the Pebble app's "
+                "developer connection with --phone <ip>, or --adb on Android.".format(cls._connect_args(args)[0]))
 
 
 class PebbleTransportPhone(PebbleTransportConfiguration):
