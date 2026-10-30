@@ -139,5 +139,28 @@ class SDKManagerUseEngDashTests(unittest.TestCase):
             self.assertTrue(manager.use_eng_dash)
 
 
+class ToolchainFlattenTests(unittest.TestCase):
+    def test_platform_only_tarball_under_arch_label(self):
+        # eng-dash may serve the legacy toolchain-mac.tar.gz in the
+        # mac-arm64 slot; extraction must not assume the root dir name.
+        import io
+        import tarfile
+        import tempfile
+        from pebble_tool.sdk.manager import SDKManager
+
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as t:
+            info = tarfile.TarInfo("toolchain-mac/bin/gcc")
+            info.size = 2
+            t.addfile(info, io.BytesIO(b"hi"))
+        buf.seek(0)
+
+        with tempfile.TemporaryDirectory() as d:
+            os.mkdir(os.path.join(d, "4.4"))
+            SDKManager(sdk_dir=d)._install_toolchain_from_handle(buf, "4.4", "mac-arm64")
+            self.assertTrue(os.path.exists(os.path.join(d, "4.4", "toolchain", "bin", "gcc")))
+            self.assertFalse(os.path.exists(os.path.join(d, "4.4", "toolchain", "toolchain-mac")))
+
+
 if __name__ == "__main__":
     unittest.main()

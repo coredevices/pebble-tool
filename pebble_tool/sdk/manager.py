@@ -8,7 +8,7 @@ import errno
 import json
 import logging
 import os
-from progressbar import ProgressBar, Percentage, Bar, FileTransferSpeed, Timer
+from progressbar import ProgressBar, Percentage, Bar, FileTransferSpeed, Timer, UnknownLength
 import requests
 import shutil
 import subprocess
@@ -213,12 +213,16 @@ class SDKManager(object):
         shape is only there so we can keep the try/finally shape callers
         were relying on previously."""
         print(label)
-        head = requests.head(url, allow_redirects=True)
-        head.raise_for_status()
-        total_size = int(head.headers.get('content-length', 0))
+        # No HEAD probe: R2 presigned URLs are signed for GET only, so a
+        # HEAD gets 403. Content-Length from the GET drives the bar.
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        total_size = int(response.headers.get('content-length', 0))
 
         bar = ProgressBar(
-            maxval=total_size,
+            # Chunked responses carry no Content-Length; a 0 max makes the
+            # first update() raise.
+            maxval=total_size or UnknownLength,
             widgets=[
                 Percentage(),
                 Bar(marker='=', left='[', right=']'),
@@ -229,9 +233,6 @@ class SDKManager(object):
             ],
         )
         bar.start()
-
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
 
         f = tempfile.TemporaryFile()
         hasher = hashlib.sha256() if sha256 else None
@@ -375,9 +376,16 @@ class SDKManager(object):
             os.mkdir(os.path.join(self.sdk_dir, sdk_version, "toolchain"))
             t.extractall(toolchain_path)
 
-        for folder in os.listdir(os.path.join(toolchain_path, 'toolchain-' + platform_name)):
-            shutil.move(os.path.join(toolchain_path, 'toolchain-' + platform_name, folder), toolchain_path)
-        os.rmdir(os.path.join(toolchain_path, 'toolchain-' + platform_name))
+        # Tarball root is toolchain-<platform>[-<arch>]; which one depends on
+        # what the server had (an arm64 slot may hold the platform-only
+        # file), so flatten whatever single toolchain-* dir it shipped.
+        roots = [d for d in os.listdir(toolchain_path) if d.startswith('toolchain-')]
+        if len(roots) != 1:
+            raise SDKInstallError("Unexpected toolchain layout (expected toolchain-{}): {}".format(platform_name, roots))
+        root = os.path.join(toolchain_path, roots[0])
+        for folder in os.listdir(root):
+            shutil.move(os.path.join(root, folder), toolchain_path)
+        os.rmdir(root)
 
     def install_remote_sdk(self, version):
         if self.use_eng_dash:
