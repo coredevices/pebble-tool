@@ -143,10 +143,11 @@ class SDKManager(object):
                 logger.warning("eng-dash list failed (%s); falling back to %s", e, self.DOWNLOAD_SERVER)
                 payload = None
             if payload is not None:
+                # Public (production) releases get no suffix in `pebble sdk list`.
                 return [
                     {
                         'version': r['version'],
-                        'channel': r.get('track') or '',
+                        'channel': '' if r.get('track') == 'production' else r.get('track') or '',
                         'url': None,
                     }
                     for r in payload.get('releases') or []
