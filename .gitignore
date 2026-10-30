@@ -6,3 +6,4 @@ pebble_tool.egg-info/
 .secrets/
 **/client_secret*.json
 **/*googleusercontent.com.json
+.gstack/
