@@ -88,7 +88,14 @@ class SDKManager(BaseCommand):
             print()
         else:
             print("No SDKs installed yet.")
-        if sdk_manager.get_channel() != '':
+        remote_label = None
+        try:
+            remote_label = sdk_manager.get_remote_channel_label()
+        except Exception:
+            remote_label = None
+        if remote_label:
+            channel_text = ' ({} channel)'.format(remote_label)
+        elif sdk_manager.get_channel() != '':
             channel_text = ' ({} channel)'.format(sdk_manager.get_channel())
         else:
             channel_text = ''
@@ -139,6 +146,13 @@ class SDKManager(BaseCommand):
     def do_set_channel(cls, args):
         sdk_manager.set_channel(args.channel)
         print("Set channel to {}.".format(sdk_manager.get_channel()))
+        if sdk_manager.use_eng_dash:
+            print(
+                "Note: when using dash.repebble.com, SDK channel is determined by "
+                "your watch channel (via `pebble login`). This local override only "
+                "applies when PEBBLE_SDK_SERVER / --server points at a legacy "
+                "sdk.repebble.com-style host."
+            )
 
     @classmethod
     def do_include_path(cls, args):
