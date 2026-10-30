@@ -47,7 +47,8 @@ class PebbleProjectBase(object):
 
         if os.path.islink(os.path.join(self.project_dir, 'pebble_app.ld')) \
                 or os.path.exists(os.path.join(self.project_dir, 'resources/src/resource_map.json')) \
-                or not os.path.exists(os.path.join(self.project_dir, 'wscript')):
+                or not (os.path.exists(os.path.join(self.project_dir, 'wscript'))
+                        or os.path.exists(os.path.join(self.project_dir, 'CMakeLists.txt'))):
             raise OutdatedProjectException("This project is very outdated, and cannot be handled by this SDK.")
 
         if self.sdk_version == '2.9':

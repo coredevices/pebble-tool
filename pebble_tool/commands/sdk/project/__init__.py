@@ -2,12 +2,13 @@
 __author__ = 'katharine'
 
 import os
+import shutil
 import subprocess
 import logging
 import sys
 
 from pebble_tool.exceptions import (PebbleProjectException, InvalidJSONException, InvalidProjectException,
-                                    OutdatedProjectException)
+                                    OutdatedProjectException, ToolError)
 from pebble_tool.sdk.project import PebbleProject
 from pebble_tool.util.analytics import post_event
 from pebble_tool.commands.sdk import SDKCommand
@@ -79,6 +80,33 @@ class SDKProjectCommand(SDKCommand):
         if extra_env is not None:
             env.update(extra_env)
         return command, env
+
+    @property
+    def uses_cmake(self):
+        """Whether the project builds with CMake (it has a CMakeLists.txt) rather than waf."""
+        return os.path.exists(os.path.join(self.project.project_dir, 'CMakeLists.txt'))
+
+    def _cmake(self, args):
+        """Run the CMake the SDK installs in its venv, with the Ninja next to it."""
+        venv_bin = os.path.join(self.get_sdk_path(), '..', '.venv', 'bin')
+        cmake = os.path.join(venv_bin, 'cmake')
+        if not os.path.exists(cmake):
+            raise ToolError("This project builds with CMake, which the current SDK does not have: "
+                            "install a newer SDK.")
+        command = [cmake] + list(args)
+        logger.debug("cmake command: %s", subprocess.list2cmdline(command))
+        env = os.environ.copy()
+        env['PATH'] = os.path.abspath(venv_bin) + os.pathsep + env.get('PATH', '')
+        subprocess.check_call(command, env=env)
+
+    def _cmake_configure(self, debug=False, args=()):
+        build_dir = os.path.join(self.project.project_dir, 'build')
+        if os.path.exists(os.path.join(build_dir, 'c4che')):
+            # What a waf build left: CMake builds in the same directory.
+            shutil.rmtree(build_dir)
+        self._cmake(['-S', self.project.project_dir, '-B', build_dir, '-G', 'Ninja',
+                     '-DPebbleSDK_DIR=' + os.path.join(self.get_sdk_path(), 'pebble', 'cmake'),
+                     '-DCMAKE_BUILD_TYPE=' + ('Debug' if debug else 'Release')] + list(args))
 
     def __call__(self, args):
         super(SDKProjectCommand, self).__call__(args)
