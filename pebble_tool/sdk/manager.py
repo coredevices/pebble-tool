@@ -1,12 +1,14 @@
 
 __author__ = 'katharine'
 
+import hashlib
 import platform
 from contextlib import closing
 import errno
 import json
+import logging
 import os
-from progressbar import ProgressBar, Percentage, Bar, FileTransferSpeed, Timer
+from progressbar import ProgressBar, Percentage, Bar, FileTransferSpeed, Timer, UnknownLength
 import requests
 import shutil
 import subprocess
@@ -16,13 +18,52 @@ import tarfile
 import textwrap
 
 from pebble_tool.exceptions import SDKInstallError, MissingSDK
+from pebble_tool.sdk import eng_dash
 from pebble_tool.sdk.requirements import Requirements
 from pebble_tool.util import get_persist_dir
 from pebble_tool.util.config import config
 from pebble_tool.util.npm import invoke_npm
 from pebble_tool.util.versions import version_to_key
 
+logger = logging.getLogger("pebble_tool.sdk.manager")
+
 _FALLBACK_PLATFORMS = ('aplite', 'basalt', 'chalk', 'diorite', 'emery', 'flint', 'gabbro')
+
+
+def _uv_executable():
+    """Locate the `uv` binary. Prefer one on PATH; fall back to a few well-known
+    install locations. Raises SDKInstallError if uv isn't installed."""
+    uv = shutil.which("uv")
+    if uv:
+        return uv
+    for candidate in (
+        os.path.expanduser("~/.local/bin/uv"),
+        os.path.expanduser("~/.cargo/bin/uv"),
+        "/opt/homebrew/bin/uv",
+        "/usr/local/bin/uv",
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    raise SDKInstallError(
+        "uv not found. Install it from https://docs.astral.sh/uv/ — pebble-tool "
+        "uses uv to manage SDK virtual environments so the Python version is "
+        "always consistent with pebble-tool itself.")
+
+
+def _create_sdk_venv(venv_path):
+    """Create an SDK venv pinned to the same Python pebble-tool itself runs
+    under. Using uv (not `python -m venv`) keeps the venv's interpreter version
+    and pebble-tool's interpreter version in lockstep, so a brew/python upgrade
+    can't leave a stale venv behind."""
+    uv = _uv_executable()
+    subprocess.check_call([uv, "venv", "--python", sys.executable, venv_path])
+
+
+def _venv_pip_install(venv_path, *args, cwd=None):
+    """Install packages into the SDK venv using uv pip."""
+    uv = _uv_executable()
+    venv_python = os.path.join(venv_path, "bin", "python")
+    subprocess.check_call([uv, "pip", "install", "--python", venv_python, *args], cwd=cwd)
 
 def get_pebble_platforms(sdk_path=None):
     """Get platforms from the installed SDK, with fallback to hardcoded list."""
@@ -51,11 +92,22 @@ def get_pebble_platforms(sdk_path=None):
 
 class SDKManager(object):
     DOWNLOAD_SERVER = "https://sdk.repebble.com"
+    DOWNLOAD_SERVER_DEFAULT = "https://sdk.repebble.com"
 
     def __init__(self, sdk_dir=None):
         self.sdk_dir = os.path.normpath(sdk_dir or os.path.join(get_persist_dir(), "SDKs"))
         if not os.path.exists(self.sdk_dir):
             os.makedirs(self.sdk_dir)
+
+    @property
+    def use_eng_dash(self):
+        """Prefer eng-dash (channel-aware SDK registry) unless the user
+        has explicitly pointed us at a legacy sdk.repebble.com-style
+        server via --server or PEBBLE_SDK_SERVER. The explicit override
+        wins so a developer can still work against a staging mirror."""
+        if os.environ.get("PEBBLE_SDK_SERVER"):
+            return False
+        return self.DOWNLOAD_SERVER == self.DOWNLOAD_SERVER_DEFAULT
 
     def list_local_sdks(self):
         sdks = []
@@ -83,8 +135,46 @@ class SDKManager(object):
         return {x['version'] for x in self.list_local_sdks()}
 
     def list_remote_sdks(self):
+        if self.use_eng_dash:
+            token = eng_dash.firebase_token_if_logged_in()
+            try:
+                payload = eng_dash.list_releases(token=token)
+            except SDKInstallError as e:
+                logger.warning("eng-dash list failed (%s); falling back to %s", e, self.DOWNLOAD_SERVER)
+                payload = None
+            if payload is not None:
+                return [
+                    {
+                        'version': r['version'],
+                        'channel': r.get('track') or '',
+                        'url': None,
+                    }
+                    for r in payload.get('releases') or []
+                ]
+            # No releases visible → fall through to legacy so a stale SDK is
+            # still listable while eng-dash is empty.
         sdks = self.request("/v1/files/sdk-core?channel={}".format(self.get_channel())).json()
         return sdks['files']
+
+    def get_remote_channel_label(self):
+        """Human-friendly channel/track label from eng-dash: used by `pebble
+        sdk list` so the user can see which track decides their SDK. None
+        when eng-dash isn't reachable or returned nothing — the caller
+        prints the legacy label (`sdk-channel` config) in that case."""
+        if not self.use_eng_dash:
+            return None
+        token = eng_dash.firebase_token_if_logged_in()
+        try:
+            payload = eng_dash.list_releases(token=token)
+        except SDKInstallError:
+            return None
+        if payload is None:
+            return None
+        channel = payload.get('channel')
+        track = payload.get('track')
+        if channel and track and channel != track:
+            return "{} / track {}".format(channel, track)
+        return track or channel
 
     def uninstall_sdk(self, version):
         current_sdk = self.get_current_sdk()
@@ -96,77 +186,96 @@ class SDKManager(object):
             else:
                 os.unlink(self._current_path)
 
-    def install_from_url(self, url):
-        print("Downloading...")
+    def install_from_url(self, url, sha256=None, toolchain_override=None):
+        with self._download_to_tempfile(url, sha256=sha256, label="Downloading..."):
+            pass  # fall through — download already in self._last_tempfile
+        f = self._last_tempfile
+        try:
+            self._install_from_handle(f, toolchain_override=toolchain_override)
+        finally:
+            f.close()
+            self._last_tempfile = None
 
-        response = requests.head(url)
-        response.raise_for_status()
-        total_size = int(response.headers.get('content-length', 0))
-
-        bar = ProgressBar(
-            maxval=total_size,
-            widgets=[
-                Percentage(),
-                Bar(marker='=', left='[', right=']'),
-                ' ',
-                FileTransferSpeed(),
-                ' ',
-                Timer(format='%s')
-            ]
-        )
-
-        bar.start()
-
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
-
-        with tempfile.TemporaryFile() as f:
-            for content in response.iter_content(512):
-                bar.update(bar.currval + len(content))
-                f.write(content)
-            bar.finish()
-            f.flush()
-            f.seek(0)
-            self._install_from_handle(f)
-
-    def install_toolchain_from_url(self, url, sdk_version, platform_name):
-        print("Downloading toolchain...")
-
-        response = requests.head(url)
-        response.raise_for_status()
-        total_size = int(response.headers.get('content-length', 0))
-
-        bar = ProgressBar(
-            maxval=total_size,
-            widgets=[
-                Percentage(),
-                Bar(marker='=', left='[', right=']'),
-                ' ',
-                FileTransferSpeed(),
-                ' ',
-                Timer(format='%s')
-            ]
-        )
-
-        bar.start()
-
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
-
-        with tempfile.TemporaryFile() as f:
-            for content in response.iter_content(512):
-                bar.update(bar.currval + len(content))
-                f.write(content)
-            bar.finish()
-            f.flush()
-            f.seek(0)
+    def install_toolchain_from_url(self, url, sdk_version, platform_name, sha256=None):
+        with self._download_to_tempfile(url, sha256=sha256, label="Downloading toolchain..."):
+            pass
+        f = self._last_tempfile
+        try:
             self._install_toolchain_from_handle(f, sdk_version, platform_name)
+        finally:
+            f.close()
+            self._last_tempfile = None
+
+    def _download_to_tempfile(self, url, sha256=None, label="Downloading..."):
+        """Stream `url` to a tempfile with a progress bar and (when
+        provided) verify its sha256 before returning. The file is left in
+        self._last_tempfile for the caller to consume; the context manager
+        shape is only there so we can keep the try/finally shape callers
+        were relying on previously."""
+        print(label)
+        # No HEAD probe: R2 presigned URLs are signed for GET only, so a
+        # HEAD gets 403. Content-Length from the GET drives the bar.
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        total_size = int(response.headers.get('content-length', 0))
+
+        bar = ProgressBar(
+            # Chunked responses carry no Content-Length; a 0 max makes the
+            # first update() raise.
+            maxval=total_size or UnknownLength,
+            widgets=[
+                Percentage(),
+                Bar(marker='=', left='[', right=']'),
+                ' ',
+                FileTransferSpeed(),
+                ' ',
+                Timer(format='%s'),
+            ],
+        )
+        bar.start()
+
+        f = tempfile.TemporaryFile()
+        hasher = hashlib.sha256() if sha256 else None
+        try:
+            for content in response.iter_content(1024 * 32):
+                bar.update(bar.currval + len(content))
+                f.write(content)
+                if hasher is not None:
+                    hasher.update(content)
+            bar.finish()
+            if hasher is not None:
+                got = hasher.hexdigest()
+                if got.lower() != sha256.lower():
+                    raise SDKInstallError(
+                        "sha256 mismatch for {}: expected {}, got {}".format(url, sha256, got),
+                    )
+            f.flush()
+            f.seek(0)
+            self._last_tempfile = f
+        except BaseException:
+            f.close()
+            raise
+
+        class _Noop(object):
+            def __enter__(self_inner):
+                return self_inner
+            def __exit__(self_inner, *_a):
+                return False
+        return _Noop()
 
     def install_from_path(self, path):
         with open(path, 'rb') as f:
             self._install_from_handle(f, toolchain_dir=os.path.dirname(os.path.abspath(path)))
 
-    def _install_from_handle(self, f, toolchain_dir=None):
+    def _install_from_handle(self, f, toolchain_dir=None, toolchain_override=None):
+        """Extract an sdk-core tarball into self.sdk_dir and install the
+        matching toolchain.
+        toolchain_override: (url, platform_label, sha256|None) tuple from
+        eng-dash. When set, replaces the DOWNLOAD_SERVER-probe path — the
+        caller has already picked which toolchain fits this host, so we
+        don't double-fetch metadata from the legacy server. toolchain_dir
+        still wins over an override so a `pebble sdk install path/to.tar`
+        with a sidecar toolchain keeps working."""
         path = None
         try:
             print("Extracting...")
@@ -186,11 +295,10 @@ class SDKManager(object):
                 os.mkdir(os.path.join(self.sdk_dir, sdk_info['version']))
                 t.extractall(path)
             venv_path = os.path.join(path, ".venv")
-            print("Preparing venv... (this may take a while)")
-            subprocess.check_call([sys.executable, "-m", "venv", venv_path])
-            print("Installing dependencies...")
-            subprocess.check_call([os.path.join(venv_path, "bin", "python"), "-m", "pip", "install", "-r",
-                                   os.path.join(path, "sdk-core", "requirements.txt")])
+            print("Preparing venv (uv)...")
+            _create_sdk_venv(venv_path)
+            print("Installing dependencies (uv pip)...")
+            _venv_pip_install(venv_path, "-r", os.path.join(path, "sdk-core", "requirements.txt"))
             package_json = os.path.join(path, "sdk-core", "package.json")
             if os.path.exists(package_json):
                 print("Installing JS dependencies... (this may take a while)")
@@ -210,6 +318,11 @@ class SDKManager(object):
                 toolchain_path, toolchain_platform = local_toolchain
                 with open(toolchain_path, 'rb') as tf:
                     self._install_toolchain_from_handle(tf, sdk_info['version'], toolchain_platform)
+            elif toolchain_override is not None:
+                tc_url, tc_platform, tc_sha256 = toolchain_override
+                self.install_toolchain_from_url(
+                    tc_url, sdk_info['version'], tc_platform, sha256=tc_sha256,
+                )
             else:
                 # Try architecture-specific toolchain first, fall back to platform-only
                 arch_specific_url = f"{self.DOWNLOAD_SERVER}/releases/{sdk_info['version']}/toolchain-{platform_name}-{arch}.tar.gz"
@@ -263,11 +376,29 @@ class SDKManager(object):
             os.mkdir(os.path.join(self.sdk_dir, sdk_version, "toolchain"))
             t.extractall(toolchain_path)
 
-        for folder in os.listdir(os.path.join(toolchain_path, 'toolchain-' + platform_name)):
-            shutil.move(os.path.join(toolchain_path, 'toolchain-' + platform_name, folder), toolchain_path)
-        os.rmdir(os.path.join(toolchain_path, 'toolchain-' + platform_name))
+        # Tarball root is toolchain-<platform>[-<arch>]; which one depends on
+        # what the server had (an arm64 slot may hold the platform-only
+        # file), so flatten whatever single toolchain-* dir it shipped.
+        roots = [d for d in os.listdir(toolchain_path) if d.startswith('toolchain-')]
+        if len(roots) != 1:
+            raise SDKInstallError("Unexpected toolchain layout (expected toolchain-{}): {}".format(platform_name, roots))
+        root = os.path.join(toolchain_path, roots[0])
+        for folder in os.listdir(root):
+            shutil.move(os.path.join(root, folder), toolchain_path)
+        os.rmdir(root)
 
     def install_remote_sdk(self, version):
+        if self.use_eng_dash:
+            try:
+                return self._install_remote_sdk_eng_dash(version)
+            except SDKInstallError as e:
+                logger.warning(
+                    "eng-dash SDK install failed (%s); falling back to %s",
+                    e, self.DOWNLOAD_SERVER,
+                )
+        return self._install_remote_sdk_legacy(version)
+
+    def _install_remote_sdk_legacy(self, version):
         sdk_info = self.request("/v1/files/sdk-core/{}?channel={}".format(version, self.get_channel())).json()
         if 'version' not in sdk_info:
             raise SDKInstallError("SDK {} could not be downloaded.".format(version))
@@ -296,6 +427,69 @@ class SDKManager(object):
         Requirements(sdk_info['requirements']).ensure_satisfied()
         self._license_prompt()
         self.install_from_url(sdk_info['url'])
+
+    def _install_remote_sdk_eng_dash(self, version):
+        token = eng_dash.firebase_token_if_logged_in()
+        if version in ("latest", "", None):
+            payload = eng_dash.latest(token=token)
+        else:
+            payload = eng_dash.release(version, token=token)
+        if payload is None:
+            raise SDKInstallError(
+                "eng-dash has no SDK release '{}' available on your channel. Run `pebble login` "
+                "first, or ask an admin to publish a release on dash.repebble.com/releases/sdk."
+                .format(version),
+            )
+        resolved_version = payload.get('version')
+        if not resolved_version:
+            raise SDKInstallError("eng-dash returned a release without a version")
+        sdk_core = payload.get('sdk_core') or {}
+        if not sdk_core.get('url'):
+            raise SDKInstallError("eng-dash release {} has no sdk-core artifact".format(resolved_version))
+        toolchain, toolchain_platform = eng_dash.pick_toolchain(payload.get('toolchains') or {})
+        if toolchain is None:
+            logger.warning(
+                "eng-dash release %s has no toolchain for this host; falling back to %s for toolchain only.",
+                resolved_version, self.DOWNLOAD_SERVER,
+            )
+        else:
+            logger.debug("eng-dash: toolchain kind=%s", toolchain_platform)
+
+        print("Installing SDK {} (channel {} / track {})...".format(
+            resolved_version,
+            payload.get('channel') or 'default',
+            payload.get('track') or 'production',
+        ))
+        self._license_prompt()
+
+        path = os.path.normpath(os.path.join(self.sdk_dir, resolved_version))
+        manifest_path = os.path.join(path, 'sdk-core', 'manifest.json')
+        if os.path.exists(path):
+            if os.path.exists(manifest_path):
+                try:
+                    with open(manifest_path) as f:
+                        json.load(f)
+                    raise SDKInstallError("SDK {} is already installed.".format(resolved_version))
+                except (ValueError, IOError):
+                    print("Detected broken installation, cleaning up...")
+                    shutil.rmtree(path)
+            else:
+                print("Detected broken installation, cleaning up...")
+                shutil.rmtree(path)
+
+        toolchain_override = None
+        if toolchain is not None:
+            toolchain_override = (
+                toolchain['url'],
+                toolchain_platform,
+                toolchain.get('sha256'),
+            )
+
+        self.install_from_url(
+            sdk_core['url'],
+            sha256=sdk_core.get('sha256'),
+            toolchain_override=toolchain_override,
+        )
 
     def _license_prompt(self):
         prompt = textwrap.dedent("""
@@ -387,12 +581,11 @@ subprocess.call([sys.executable, {}] + sys.argv[1:])
                 'channel': '',
             }, f)
 
-        print("Preparing venv... (this may take a while)")
-        subprocess.check_call([sys.executable, "-m", "venv", env_path])
-        print("Installing dependencies...")
+        print("Preparing venv (uv)...")
+        _create_sdk_venv(env_path)
+        print("Installing dependencies (uv pip)...")
         print("This may fail installing Pillow==2.0.0. In that case, question why we still force 2.0.0 anyway.")
-        subprocess.check_call([os.path.join(env_path, "bin", "python"), "-m", "pip", "install", "-r",
-                               os.path.join(path, "requirements.txt")], cwd=path)
+        _venv_pip_install(env_path, "-r", os.path.join(path, "requirements.txt"), cwd=path)
         # if sys.platform.startswith('darwin'):
         #     platform = 'osx'
         #     subprocess.check_call([os.path.join(env_path, "bin", "python"), "-m", "pip", "install", "-r",

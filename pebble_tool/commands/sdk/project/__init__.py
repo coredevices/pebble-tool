@@ -20,6 +20,39 @@ class SDKProjectCommand(SDKCommand):
     def waf_path(self):
         return os.path.join(self.get_sdk_path(), 'pebble', 'waf')
 
+    def _ensure_venv_matches_pebble_tool(self, venv):
+        """The SDK venv's Python must match pebble-tool's Python; otherwise
+        running waf with PYTHONPATH set to pebble-tool's sys.path mixes
+        bytecode from two minor versions and produces 'SRE module mismatch'
+        and similar errors. Recreate the venv with uv if it drifts (e.g.
+        after `brew reinstall python@3.X` or a pebble-tool upgrade)."""
+        venv_python = os.path.join(venv, 'bin', 'python')
+        if not os.path.exists(venv_python):
+            recreate = True
+        else:
+            try:
+                got = subprocess.check_output(
+                    [venv_python, '-c',
+                     'import sys; print("%d.%d" % sys.version_info[:2])'],
+                    text=True).strip()
+                want = "%d.%d" % sys.version_info[:2]
+                recreate = (got != want)
+            except subprocess.CalledProcessError:
+                recreate = True
+        if not recreate:
+            return
+        logger.warning("SDK venv at %s is stale; rebuilding with uv to match "
+                       "pebble-tool's Python (%d.%d).",
+                       venv, sys.version_info[0], sys.version_info[1])
+        from pebble_tool.sdk.manager import _create_sdk_venv, _venv_pip_install
+        import shutil as _shutil
+        if os.path.exists(venv):
+            _shutil.rmtree(venv)
+        _create_sdk_venv(venv)
+        requirements = os.path.join(self.get_sdk_path(), 'requirements.txt')
+        if os.path.exists(requirements):
+            _venv_pip_install(venv, '-r', requirements)
+
     def _waf(self, command, extra_env=None, args=None):
         command, env = self._waf_invocation(command, extra_env, args)
         subprocess.check_call(command, env=env)
@@ -34,6 +67,7 @@ class SDKProjectCommand(SDKCommand):
             v = '-' + ('v' * self._verbosity)
             args = [v] + args
         venv = os.path.join(self.get_sdk_path(), '..', '.venv')
+        self._ensure_venv_matches_pebble_tool(venv)
         node_modules = os.path.join(self.get_sdk_path(), '..', 'node_modules')
         command = [os.path.join(venv, 'bin', 'python'), self.waf_path, command] + args
         logger.debug("waf command: %s", subprocess.list2cmdline(command))
