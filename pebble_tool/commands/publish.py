@@ -66,6 +66,56 @@ class PublishCommand(BaseCommand):
             os.close(saved_out)
             os.close(saved_err)
 
+    # Function request bodies on the appstore are capped at 4.5 MB, so larger PBWs go straight to
+    # storage through a presigned URL and the form carries the returned key instead of the file.
+    PRESIGNED_PBW_THRESHOLD = 4 * 1024 * 1024
+
+    @classmethod
+    def _stage_large_pbw(cls, api_base, firebase_id_token, pbw_path, app_id=None):
+        """Uploads a PBW over the threshold to storage. Returns form fields to send instead of pbwFile, or None.
+        app_id is needed for GitHub Actions OIDC tokens, which can publish for several developers."""
+        try:
+            size = os.path.getsize(pbw_path)
+        except OSError as e:
+            raise ToolError("Could not open PBW file {}: {}".format(pbw_path, e))
+        if size <= cls.PRESIGNED_PBW_THRESHOLD:
+            return None
+        url = "{}/api/dashboard/pbw-upload".format(api_base.rstrip("/"))
+        body = {"size": size}
+        if app_id:
+            body["appId"] = app_id
+        try:
+            presign = requests.post(
+                url,
+                headers={"Authorization": "Bearer {}".format(firebase_id_token)},
+                json=body,
+                timeout=60,
+            )
+        except requests.RequestException as e:
+            raise ToolError("Could not start PBW upload: {}".format(e))
+        try:
+            payload = presign.json()
+        except ValueError:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        if presign.status_code >= 400 or not payload.get("url") or not payload.get("key"):
+            raise ToolError("Could not start PBW upload ({}): {}".format(
+                presign.status_code, payload.get("error", presign.text[:200])))
+        try:
+            with open(pbw_path, "rb") as handle:
+                put = requests.put(
+                    payload["url"],
+                    data=handle,
+                    headers={"Content-Type": "application/octet-stream", "Content-Length": str(size)},
+                    timeout=300,
+                )
+        except (OSError, requests.RequestException) as e:
+            raise ToolError("PBW upload failed: {}".format(e))
+        if put.status_code >= 400:
+            raise ToolError("PBW upload failed (HTTP {})".format(put.status_code))
+        return {"pbwKey": payload["key"], "pbwName": os.path.basename(pbw_path)}
+
     @classmethod
     def _post_with_wait_bar(cls, url, headers, data, files, timeout, label):
         response_holder = {}
@@ -590,6 +640,7 @@ class PublishCommand(BaseCommand):
         gif_paths,
         screenshot_paths,
         replace_screenshots=False,
+        staged=None,
     ):
         url = "{}/api/dashboard/apps/{}/releases".format(api_base.rstrip("/"), app_id)
         form_data = {
@@ -599,20 +650,26 @@ class PublishCommand(BaseCommand):
             "replaceScreenshots": "true" if replace_screenshots else "false",
         }
 
+        if staged is None:
+            staged = cls._stage_large_pbw(api_base, firebase_id_token, pbw_path, app_id=app_id)
+        if staged:
+            form_data.update(staged)
+
         files_payload = []
         open_files = []
         try:
-            try:
-                pbw_handle = open(pbw_path, "rb")
-            except OSError as e:
-                raise ToolError("Could not open PBW file {}: {}".format(pbw_path, e))
-            open_files.append(pbw_handle)
-            files_payload.append(
-                (
-                    "pbwFile",
-                    (os.path.basename(pbw_path), pbw_handle, "application/octet-stream"),
+            if not staged:
+                try:
+                    pbw_handle = open(pbw_path, "rb")
+                except OSError as e:
+                    raise ToolError("Could not open PBW file {}: {}".format(pbw_path, e))
+                open_files.append(pbw_handle)
+                files_payload.append(
+                    (
+                        "pbwFile",
+                        (os.path.basename(pbw_path), pbw_handle, "application/octet-stream"),
+                    )
                 )
-            )
 
             open_files.extend(cls._append_capture_files(files_payload, gif_paths))
             open_files.extend(cls._append_capture_files(files_payload, screenshot_paths))
@@ -660,6 +717,7 @@ class PublishCommand(BaseCommand):
                     is_published=is_published,
                     gif_paths=[], screenshot_paths=[],
                     replace_screenshots=False,
+                    staged=staged,
                 )
             raise ToolError(
                 "Release upload failed ({}): {}".format(
@@ -914,6 +972,7 @@ class PublishCommand(BaseCommand):
         is_published,
         gif_paths,
         screenshot_paths,
+        staged=None,
     ):
         url = "{}/api/dashboard/apps".format(api_base.rstrip("/"))
         form_data = {
@@ -940,15 +999,21 @@ class PublishCommand(BaseCommand):
                 create_details.get("description") or "",
             ).strip()
 
+        if staged is None:
+            staged = cls._stage_large_pbw(api_base, firebase_id_token, pbw_path)
+        if staged:
+            form_data.update(staged)
+
         files_payload = []
         open_files = []
         try:
-            try:
-                pbw_handle = open(pbw_path, "rb")
-            except OSError as e:
-                raise ToolError("Could not open PBW file {}: {}".format(pbw_path, e))
-            open_files.append(pbw_handle)
-            files_payload.append(("pbwFile", (os.path.basename(pbw_path), pbw_handle, "application/octet-stream")))
+            if not staged:
+                try:
+                    pbw_handle = open(pbw_path, "rb")
+                except OSError as e:
+                    raise ToolError("Could not open PBW file {}: {}".format(pbw_path, e))
+                open_files.append(pbw_handle)
+                files_payload.append(("pbwFile", (os.path.basename(pbw_path), pbw_handle, "application/octet-stream")))
 
             icon_small_path = create_details.get("icon_small_path")
             if icon_small_path:
@@ -1011,6 +1076,7 @@ class PublishCommand(BaseCommand):
                     release_notes=release_notes,
                     is_published=is_published,
                     gif_paths=[], screenshot_paths=[],
+                    staged=staged,
                 )
             raise ToolError(
                 "App create failed ({}): {}".format(
