@@ -11,26 +11,66 @@ from pebble_tool.commands.sdk.project import SDKProjectCommand
 from pebble_tool.exceptions import OutdatedProjectException, ToolError
 from pebble_tool.sdk import manifest_v2
 from pebble_tool.sdk.project import NpmProject
-from pebble_tool.sdk import get_pebble_platforms
+from pebble_tool.sdk import get_pebble_platforms, sdk_has_cmake
+from pebble_tool.sdk.cmake_convert import ConversionError, convert_wscript
 
 
 class PblProjectConverter(SDKProjectCommand):
-    """Converts an appinfo project from SDK 2 or SDK 3 to a modern package.json project."""
+    """Converts a project to the current format: appinfo.json to package.json, and a wscript to a
+    CMakeLists.txt."""
     command = 'convert-project'
 
     def __call__(self, args):
         try:
             super(PblProjectConverter, self).__call__(args)
+            converted = False
             if not isinstance(self.project, NpmProject):
                 self._convert_to_npm()
                 print("Converted to package.json format.")
-            else:
-                print("No conversion required")
+                converted = True
         except OutdatedProjectException:
             self._convert_project()
             super(PblProjectConverter, self).__call__(args)
             self._convert_to_npm()
             print("Project successfully converted!")
+            converted = True
+        converted = self._convert_to_cmake() or converted
+        if not converted:
+            print("No conversion required")
+
+    def _convert_to_cmake(self):
+        """Port the wscript to a CMakeLists.txt, when the SDK builds with CMake."""
+        project_dir = self.project.project_dir
+        wscript = os.path.join(project_dir, 'wscript')
+        cmakelists = os.path.join(project_dir, 'CMakeLists.txt')
+        if not os.path.exists(wscript) or os.path.exists(cmakelists):
+            return False
+        if not sdk_has_cmake():
+            return False
+        with open(os.path.join(project_dir, 'package.json')) as f:
+            package = json.load(f)
+        pebble = package.get('pebble', {})
+        project_type = pebble.get('projectType', 'native')
+        if project_type in ('rocky', 'moddable'):
+            print("{} projects still build with waf: the wscript stays.".format(project_type.capitalize()))
+            return False
+        name = package.get('name', os.path.basename(os.path.abspath(project_dir))).split('/')[-1]
+        try:
+            result = convert_wscript(project_dir, name, project_type, pebble.get('enableMultiJS', False))
+        except ConversionError as e:
+            raise ToolError(str(e))
+        with open(cmakelists, 'w') as f:
+            f.write(result.cmake)
+        os.rename(wscript, wscript + '.backup')
+        print("Wrote CMakeLists.txt from the wscript, which is kept as wscript.backup.")
+        print("New source files have to be added to CMakeLists.txt: it lists them, where the wscript "
+              "took whatever was in src/.")
+        if result.review:
+            print("The wscript did more than build the sources. This was not carried over, and is "
+                  "listed at the end of CMakeLists.txt:")
+            for number, text in result.review:
+                print("  line {}: {}".format(number, text))
+        return True
 
     def _convert_to_npm(self):
         new_info = {
