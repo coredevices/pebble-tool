@@ -51,6 +51,8 @@ pebble screenshot --scale 6 --no-open screenshot.png   # check the new state
 
 `pebble logs --emulator emery` streams until Ctrl-C, so run it in a second terminal or in the background while you interact with the app, and stop it before moving on.
 
+Only keep a connection open (`pebble logs`, `--logs`) while you actually need its output. On a physical watch (`--phone` / `--cloudpebble`), an open log stream keeps Bluetooth active and drains the battery of the watch and phone. Leave out `--logs` when you only need to install, and stop any log stream as soon as you have what you need.
+
 Repeat with `--emulator <platform>` for each platform in `targetPlatforms` in package.json. Round displays (chalk, gabbro) and the smaller aplite/diorite screens need their own check.
 
 ### Headless Environments
