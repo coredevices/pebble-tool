@@ -11,7 +11,7 @@ from pebble_tool.exceptions import ToolError
 
 
 class CompileCommandsCommand(SDKProjectCommand):
-    """(Deprecated) Generate a compile_commands.json so editors (clangd, etc.) can resolve the Pebble SDK."""
+    """Generate a compile_commands.json so editors (clangd, etc.) can resolve the Pebble SDK."""
     command = "compile-commands"
 
     def __call__(self, args):
@@ -20,7 +20,6 @@ class CompileCommandsCommand(SDKProjectCommand):
         if self.uses_cmake:
             raise ToolError("Unsupported for CMake projects: build with "
                             "`pebble build -- -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` instead.")
-        print("`pebble compile-commands` is deprecated, along with building with waf.")
 
         platform = self._choose_platform(args.platform)
         project_dir = os.path.abspath(self.project.project_dir)
