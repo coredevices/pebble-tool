@@ -170,3 +170,76 @@ def test_own_functions_are_reported_once(tmp_path) -> None:
         """)
     result = convert_wscript(project(tmp_path, wscript, ['src/c/main.c']), 'app')
     assert [text for _, text in result.review] == ['def generate_keys(task):']
+
+
+CLOUDPEBBLE_WSCRIPT = textwrap.dedent("""\
+    import os.path
+
+    def options(ctx):
+        ctx.load('pebble_sdk')
+
+    def configure(ctx):
+        ctx.load('pebble_sdk')
+
+    def build(ctx):
+        if False and hint is not None:
+            hint([node.abspath() for node in ctx.path.ant_glob("src/**/*.js")], _tty_out=False)
+        ctx.path.make_node('src/js/').mkdir()
+        js_paths = ctx.path.ant_glob(['src/*.js', 'src/**/*.js'])
+        if js_paths:
+            ctx(rule='cat ${SRC} > ${TGT}', source=js_paths, target='pebble-js-app.js')
+            has_js = True
+        else:
+            has_js = False
+        ctx.load('pebble_sdk')
+        build_worker = os.path.exists('worker_src')
+        binaries = []
+        for p in ctx.env.TARGET_PLATFORMS:
+            ctx.set_env(ctx.all_envs[p])
+            app_elf = '{}/pebble-app.elf'.format(p)
+            ctx.pbl_program(source=ctx.path.ant_glob('src/**/*.c'), target=app_elf)
+            if build_worker:
+                worker_elf = '{}/pebble-worker.elf'.format(p)
+                ctx.pbl_worker(source=ctx.path.ant_glob('src/**/*.c'), target=worker_elf)
+        ctx.pbl_bundle(binaries=binaries, js='pebble-js-app.js' if has_js else [])
+    """)
+
+
+def test_cloudpebble_wscript(tmp_path) -> None:
+    # It joins the JS itself, lints behind `if False`, and builds a worker only if there is one.
+    result = convert_wscript(project(tmp_path, CLOUDPEBBLE_WSCRIPT, ['src/main.c', 'src/js/app.js']),
+                             'face', enable_multi_js=False)
+    assert not result.review
+    assert ('COMMAND ${CMAKE_COMMAND} -E cat src/js/app.js > ${CMAKE_BINARY_DIR}/pebble-js-app.js'
+            in result.cmake)
+    assert 'pebble_js(SOURCES ${CMAKE_BINARY_DIR}/pebble-js-app.js)' in result.cmake
+    assert 'pebble_worker' not in result.cmake
+    # With enableMultiJS webpack bundles the same sources.
+    multi = convert_wscript(str(tmp_path), 'face', enable_multi_js=True)
+    assert 'pebble_js(\n  SOURCES\n    src/js/app.js\n  ENTRY src/js/app.js\n)' in multi.cmake
+
+
+def test_angle_bracket_include_needs_the_directory(tmp_path) -> None:
+    root = project(tmp_path, DEFAULT_WSCRIPT, ['src/c/main.c', 'src/c/face.h'])
+    (tmp_path / 'src' / 'c' / 'main.c').write_text('#include <face.h>\n')
+    assert 'target_include_directories(app INTERFACE src/c)' not in convert_wscript(root, 'a').cmake
+    (tmp_path / 'src' / 'main.c').write_text('#include <top.h>\n')
+    (tmp_path / 'src' / 'top.h').write_text('')
+    wscript = DEFAULT_WSCRIPT.replace("src/c/**/*.c", "src/*.c")
+    root = project(tmp_path, wscript, ['src/main.c', 'src/top.h'])
+    (tmp_path / 'src' / 'main.c').write_text('#include <top.h>\n')
+    assert 'target_include_directories(app INTERFACE src)' in convert_wscript(root, 'a').cmake
+
+
+def test_own_tools_and_other_languages_are_reported(tmp_path) -> None:
+    wscript = textwrap.dedent("""\
+        def configure(ctx):
+            ctx.load('pebble_sdk')
+            ctx.load('pebble_cxx', tooldir='waftools')
+
+        def build(ctx):
+            ctx.pbl_program(source=ctx.path.ant_glob('src/**/*.cpp'), target='app.elf')
+            ctx.pbl_bundle(binaries=[])
+        """)
+    result = convert_wscript(project(tmp_path, wscript, ['src/main.cpp']), 'a')
+    assert [number for number, _ in result.review] == [3, 6]
