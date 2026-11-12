@@ -11,6 +11,7 @@ import os
 import os.path
 import platform
 import re
+import select
 import shutil
 import signal
 import socket
@@ -20,7 +21,9 @@ import tempfile
 import time
 
 from libpebble2.communication.transports.websocket import WebsocketTransport
+from libpebble2.communication.transports.qemu.protocol import QemuPacket, QemuSPP
 from libpebble2.exceptions import ConnectionError
+from libpebble2.protocol.system import WatchVersion, WatchVersionRequest
 
 from pebble_tool.account import get_default_account
 from pebble_tool.exceptions import MissingEmulatorError, ToolError
@@ -120,6 +123,18 @@ def update_emulator_info(platform, version, new_content):
         content.setdefault(platform, {})[version] = new_content
     with open(get_emulator_info_path(), 'w') as f:
         json.dump(content, f, indent=4)
+
+
+FIRMWARE_BOOT_MARKERS = (b"<SDK Home>", b"<Launcher>", b"Ready for communication")
+FIRMWARE_BOOT_TIMEOUT = 120
+# How long a booted watch has to print a marker. Answering doesn't mean its first app has started.
+FIRMWARE_MARKER_GRACE = 5
+FIRMWARE_PROBE_INTERVAL = 1
+WATCH_VERSION_REQUEST = QemuPacket(
+    protocol=1, data=QemuSPP(payload=WatchVersion(data=WatchVersionRequest()).serialise_packet())
+).serialise()
+# A QEMU SPP frame holding a WatchVersionResponse.
+WATCH_VERSION_RESPONSE = re.compile(rb'\xfe\xed\x00\x01....\x00\x10\x01', re.DOTALL)
 
 
 class ManagedEmulatorTransport(WebsocketTransport):
@@ -481,19 +496,63 @@ class ManagedEmulatorTransport(WebsocketTransport):
         else:
             post_event("qemu_launched", success=False, reason="qemu_launch_timeout")
             raise ToolError("Emulator launch timed out.")
-        received = b''
-        while True:
-            try:
-                received += s.recv(256)
-            except socket.error as e:
-                # Ignore "Interrupted system call"
-                if e.errno != errno.EINTR:
-                    raise
-            if b"<SDK Home>" in received or b"<Launcher>" in received or b"Ready for communication" in received:
-                break
-        s.close()
+        try:
+            self._wait_for_boot(s)
+        except ToolError:
+            post_event("qemu_launched", success=False, reason="firmware_boot_timeout")
+            raise
+        finally:
+            s.close()
         post_event("qemu_launched", success=True)
         logger.info("Firmware booted.")
+
+    def _wait_for_boot(self, serial):
+        """Returns on a boot marker, or once a watch that answers the protocol has had time to print one."""
+        deadline = time.monotonic() + FIRMWARE_BOOT_TIMEOUT
+        protocol = None
+        answered_at = None
+        next_probe = 0
+        log = b''
+        replies = b''
+        try:
+            while not any(marker in log for marker in FIRMWARE_BOOT_MARKERS):
+                now = time.monotonic()
+                if answered_at is not None and now - answered_at >= FIRMWARE_MARKER_GRACE:
+                    logger.debug("Firmware answered but printed no boot marker.")
+                    return
+                if now >= deadline:
+                    raise ToolError("The firmware didn't boot within {} seconds.".format(FIRMWARE_BOOT_TIMEOUT))
+                if answered_at is None and now >= next_probe:
+                    next_probe = now + FIRMWARE_PROBE_INTERVAL
+                    try:
+                        if protocol is None:
+                            protocol = socket.create_connection(('localhost', self.qemu_port))
+                        protocol.sendall(WATCH_VERSION_REQUEST)
+                    except socket.error:
+                        logger.debug("QEMU protocol port not ready yet.")
+                        if protocol is not None:
+                            protocol.close()
+                            protocol = None
+                sockets = [serial] if protocol is None else [serial, protocol]
+                for ready in select.select(sockets, [], [], 0.1)[0]:
+                    try:
+                        data = ready.recv(256)
+                    except socket.error:
+                        data = b''
+                    if ready is serial:
+                        if not data:
+                            raise ToolError("The emulator exited while the firmware was booting.")
+                        log += data
+                    elif data:
+                        replies += data
+                        if answered_at is None and WATCH_VERSION_RESPONSE.search(replies):
+                            answered_at = time.monotonic()
+                    else:
+                        protocol.close()
+                        protocol = None
+        finally:
+            if protocol is not None:
+                protocol.close()
 
     def _copy_spi_image(self, path):
         sdk_qemu_spi_flash = os.path.join(sdk_path(), 'pebble', self.platform, 'qemu', 'qemu_spi_flash.bin.bz2')
