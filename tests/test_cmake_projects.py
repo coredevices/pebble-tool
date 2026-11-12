@@ -10,6 +10,7 @@ import types
 import pytest
 
 from pebble_tool.commands.sdk import create
+from pebble_tool.commands.sdk.project import convert
 from pebble_tool.commands.sdk.project import SDKProjectCommand
 from pebble_tool.commands.sdk.project.build import BuildCommand, CleanCommand
 from pebble_tool.commands.sdk.project.compile_commands import CompileCommandsCommand
@@ -72,6 +73,30 @@ def test_build_replaces_a_waf_build_directory(project, monkeypatch):
     command, args = _parse(BuildCommand, [])
     command(args)
     assert not (project / 'build' / 'c4che').exists()
+
+
+def test_a_waf_project_still_builds_with_waf(project, monkeypatch):
+    # Whatever the SDK has: a project without a CMakeLists.txt is a waf project.
+    (project / 'CMakeLists.txt').unlink()
+    (project / 'wscript').write_text('')
+    waf = []
+    monkeypatch.setattr(BuildCommand, '_waf', lambda self, command, **k: waf.append(command))
+    monkeypatch.setattr(SDKProjectCommand, '_cmake', lambda *a, **k: pytest.fail("CMake ran"))
+    monkeypatch.setattr('pebble_tool.commands.sdk.project.build.post_event', lambda *a, **k: None)
+    command, args = _parse(BuildCommand, [])
+    command(args)
+    assert waf == ['configure', 'build']
+
+
+def test_convert_keeps_the_wscript_on_an_sdk_without_cmake(project, monkeypatch):
+    (project / 'CMakeLists.txt').unlink()
+    (project / 'wscript').write_text('')
+    monkeypatch.setattr(convert, 'sdk_has_cmake', lambda: False)
+    command = convert.PblProjectConverter()
+    command.project = types.SimpleNamespace(project_dir=str(project))
+    assert not command._convert_to_cmake()
+    assert (project / 'wscript').exists()
+    assert not (project / 'CMakeLists.txt').exists()
 
 
 def test_clean_removes_the_build_directory(project, monkeypatch):
