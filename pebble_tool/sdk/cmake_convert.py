@@ -17,6 +17,7 @@ __all__ = ['convert_wscript', 'ConversionResult', 'ConversionError']
 # Calls a wscript that does nothing of its own makes.
 _KNOWN_CALLS = {
     'load', 'ant_glob', 'exists', 'set_env', 'set_group', 'format', 'append', 'delete',
+    'make_node', 'mkdir',
     'pbl_program', 'pbl_build', 'pbl_worker', 'pbl_bundle',
 }
 _FLAG_COMMANDS = {
@@ -77,10 +78,64 @@ def _expand(project_dir, patterns, excludes=()):
     return sorted(m for m in matches if not any(fnmatch.fnmatch(m, e) for e in excludes))
 
 
-def _glob_files(project_dir, node):
+class _Scope(object):
+    """What is needed to read a call in its place: the variables the wscript sets once, and the
+    conditions it is under."""
+    def __init__(self, tree, project_dir):
+        self.project_dir = project_dir
+        self.parents = {}
+        self.names = {}
+        assigned = {}
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                self.parents[child] = node
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)):
+                assigned.setdefault(node.targets[0].id, []).append(node.value)
+        # A name set in more than one place has no one value.
+        self.names = {name: values[0] for name, values in assigned.items() if len(values) == 1}
+
+    def resolve(self, node):
+        seen = set()
+        while isinstance(node, ast.Name) and node.id in self.names and node.id not in seen:
+            seen.add(node.id)
+            node = self.names[node.id]
+        return node
+
+    def truth(self, test):
+        """Whether a condition holds, when that can be told without running the wscript."""
+        test = self.resolve(test)
+        if isinstance(test, ast.Constant):
+            return bool(test.value)
+        if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And):
+            values = [self.truth(v) for v in test.values]
+            return False if False in values else (True if all(values) else None)
+        if isinstance(test, ast.Call) and _call_name(test) == 'exists' and len(test.args) == 1:
+            path = _literal(test.args[0])
+            if isinstance(path, str):
+                return os.path.exists(os.path.join(self.project_dir, path))
+        return None
+
+    def runs(self, node):
+        """False for a call that is never made: it is under a condition that does not hold."""
+        child, parent = node, self.parents.get(node)
+        while parent is not None:
+            if isinstance(parent, ast.If):
+                truth = self.truth(parent.test)
+                if truth is False and child in parent.body:
+                    return False
+                if truth is True and child in parent.orelse:
+                    return False
+            child, parent = parent, self.parents.get(parent)
+        return True
+
+
+def _glob_files(project_dir, node, scope=None):
     """The files a `ctx.path.ant_glob(...)` argument names, or None if it is anything else."""
     if node is None:
         return []
+    if scope is not None:
+        node = scope.resolve(node)
     if isinstance(node, ast.Call) and _call_name(node) == 'ant_glob' and node.args:
         patterns = _literal(node.args[0])
         if patterns is None:
@@ -89,8 +144,8 @@ def _glob_files(project_dir, node):
         excludes = _as_list(_literal(keywords['excl'])) if 'excl' in keywords else []
         return _expand(project_dir, _as_list(patterns), excludes)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left = _glob_files(project_dir, node.left)
-        right = _glob_files(project_dir, node.right)
+        left = _glob_files(project_dir, node.left, scope)
+        right = _glob_files(project_dir, node.right, scope)
         return None if left is None or right is None else sorted(set(left + right))
     literal = _literal(node)
     if isinstance(literal, (list, tuple, str)):
@@ -116,7 +171,7 @@ def _flag_setting(call):
     return (variable, values) if all(isinstance(v, str) for v in values) else None
 
 
-_INCLUDE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE)
+_INCLUDE = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]', re.MULTILINE)
 # What waf put on the include path of every project, without being asked.
 _IMPLICIT_INCLUDES = ('src', 'include', '.')
 
@@ -137,9 +192,10 @@ def _implicit_includes(project_dir, sources):
                 text = f.read()
         except (IOError, OSError):
             continue
-        for name in _INCLUDE.findall(text):
+        for quote, name in _INCLUDE.findall(text):
             local = os.path.normpath(os.path.join(os.path.dirname(path), name))
-            if os.path.isfile(os.path.join(project_dir, local)):
+            # Only #include "..." looks next to the file including it.
+            if quote == '"' and os.path.isfile(os.path.join(project_dir, local)):
                 queue.append(local)
                 continue
             for directory in _IMPLICIT_INCLUDES:
@@ -188,6 +244,10 @@ def convert_wscript(project_dir, project_name, project_type='native', enable_mul
     app_sources, worker_sources, headers, js, js_entry = [], [], [], [], None
     includes, flags, review = [], [], {}
     handled = set()
+    scope = _Scope(tree, project_dir)
+    # What the wscript concatenates into a JS file of its own, as CloudPebble's does.
+    joined_js = {}
+    bundle_js = None
 
     # A function of the wscript's own is reported once, not line by line.
     own = [node for node in tree.body
@@ -200,10 +260,25 @@ def convert_wscript(project_dir, project_name, project_type='native', enable_mul
         review[node.lineno] = lines[node.lineno - 1].strip()
 
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+        if not isinstance(node, ast.Call) or not scope.runs(node):
             continue
         name = _call_name(node)
         keywords = _keywords(node)
+
+        if name == 'load' and (keywords or not node.args
+                               or _literal(node.args[0]) not in ('pebble_sdk', 'pebble_sdk_lib')):
+            # A waf tool of the project's own.
+            note(node)
+            continue
+
+        rule = _literal(keywords['rule']) if 'rule' in keywords else None
+        if isinstance(rule, str) and re.fullmatch(r'cat \$\{SRC\} > \$\{TGT\}', rule.strip()):
+            target_file = _literal(keywords.get('target'))
+            files = _glob_files(project_dir, keywords.get('source'), scope)
+            if isinstance(target_file, str) and files is not None:
+                joined_js[target_file] = [f for f in files if f.endswith('.js')]
+                handled.add(node.lineno)
+                continue
 
         flag = _flag_setting(node)
         if flag is not None:
@@ -212,10 +287,13 @@ def convert_wscript(project_dir, project_name, project_type='native', enable_mul
             continue
 
         if name in ('pbl_program', 'pbl_build', 'pbl_worker'):
-            files = _glob_files(project_dir, keywords.get('source'))
+            files = _glob_files(project_dir, keywords.get('source'), scope)
             if files is None:
                 note(node)
                 continue
+            if any(not f.endswith(('.c', '.s', '.S')) for f in files):
+                # The SDK compiles C; anything else took a tool of the wscript's own.
+                note(node)
             bin_type = _literal(keywords['bin_type']) if 'bin_type' in keywords else None
             if name == 'pbl_worker' or bin_type == 'worker':
                 worker_sources = files
@@ -231,15 +309,22 @@ def convert_wscript(project_dir, project_name, project_type='native', enable_mul
             if unknown:
                 note(node)
         elif name == 'pbl_bundle':
-            found = _glob_files(project_dir, keywords.get('js'))
-            if found is None:
+            js_node = scope.resolve(keywords['js']) if 'js' in keywords else None
+            if isinstance(js_node, ast.IfExp):
+                # `'pebble-js-app.js' if has_js else []`: there is JS or there is none.
+                js_node = js_node.body
+            bundle_js = _literal(js_node) if js_node is not None else None
+            found = _glob_files(project_dir, js_node, scope)
+            if isinstance(bundle_js, str) and bundle_js in joined_js:
+                pass
+            elif found is None:
                 note(node)
             else:
                 js = [f for f in found if f.endswith(('.js', '.json'))]
             if 'js_entry_file' in keywords:
                 js_entry = _literal(keywords['js_entry_file'])
             if 'includes' in keywords:
-                found = _glob_files(project_dir, keywords['includes'])
+                found = _glob_files(project_dir, keywords['includes'], scope)
                 if found is None:
                     note(node)
                 else:
@@ -249,6 +334,15 @@ def convert_wscript(project_dir, project_name, project_type='native', enable_mul
                 note(node)
         elif name not in _KNOWN_CALLS:
             note(node)
+
+    joined = None
+    if isinstance(bundle_js, str) and bundle_js in joined_js:
+        # With enableMultiJS webpack makes the file instead, from the same sources.
+        js = joined_js[bundle_js]
+        if not enable_multi_js and js != [bundle_js]:
+            joined = bundle_js
+        elif enable_multi_js and len(js) == 1 and not js_entry:
+            js_entry = js[0]
 
     # Anything the wscript defines beyond the three functions waf calls is its own.
     for node in own:
@@ -291,7 +385,17 @@ def convert_wscript(project_dir, project_name, project_type='native', enable_mul
                 ' '.join(dict.fromkeys(includes))))
     for variable, values in flags:
         out.append('{}({} INTERFACE {})'.format(_FLAG_COMMANDS[variable], target, ' '.join(values)))
-    if js:
+    if js and joined:
+        out.append('\n'.join(
+            ['# The wscript joined the JS into one file itself.',
+             'add_custom_command(',
+             '  OUTPUT ${{CMAKE_BINARY_DIR}}/{}'.format(joined),
+             '  COMMAND ${{CMAKE_COMMAND}} -E cat {} > ${{CMAKE_BINARY_DIR}}/{}'.format(' '.join(js), joined),
+             '  DEPENDS {}'.format(' '.join(js)),
+             '  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}',
+             ')',
+             'pebble_js(SOURCES ${{CMAKE_BINARY_DIR}}/{})'.format(joined)]))
+    elif js:
         block = ['pebble_js(', '  SOURCES'] + ['    ' + j for j in js]
         # Without enableMultiJS the files are copied as they are, and there is no entry point.
         if js_entry and enable_multi_js and not is_package:
