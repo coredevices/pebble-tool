@@ -131,7 +131,7 @@ class ToolAppInstaller(object):
 
     def install(self, force_install=False):
         if isinstance(self.pebble.transport, WebsocketTransport):
-            self._install_via_websocket(self.pebble, self.pbw)
+            self._install_via_websocket(self.pebble, self.pbw, force_install=force_install)
         else:
             self._install_via_serial(self.pebble, self.pbw, force_install=force_install)
 
@@ -149,7 +149,10 @@ class ToolAppInstaller(object):
     @staticmethod
     def _check_platform(pebble, pbw):
         """Refuse a pbw with nothing that runs on this watch, which the phone would only fail to install
-        without saying why."""
+        without saying why. A watch libpebble2 doesn't recognise is left to the phone, which knows more boards."""
+        platform = pebble.watch_platform
+        if platform == 'unknown':
+            return
         bundle = PebbleBundle(pbw, hardware=pebble.watch_info.running.hardware_platform)
         names = bundle.zip.namelist()
         built = sorted(path[:-len('/' + PebbleBundle.MANIFEST_FILENAME)] for path in names
@@ -157,13 +160,13 @@ class ToolAppInstaller(object):
         if not built and PebbleBundle.MANIFEST_FILENAME not in names:
             return  # Nothing for the watch, e.g. a plugin-only pbw.
         if not bundle.should_permit_install():
-            platform = pebble.watch_platform
             raise ToolError("This pbw has no {platform} build{has}. Add \"{platform}\" to targetPlatforms in "
                             "package.json and rebuild.".format(
                                 platform=platform, has=" (it has {})".format(", ".join(built)) if built else ""))
 
-    def _install_via_websocket(self, pebble, pbw):
-        self._check_platform(pebble, pbw)
+    def _install_via_websocket(self, pebble, pbw, force_install=False):
+        if not force_install:
+            self._check_platform(pebble, pbw)
         with open(pbw, 'rb') as f:
             if not self.quiet:
                 print("Installing app...")

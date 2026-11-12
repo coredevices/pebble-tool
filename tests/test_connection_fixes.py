@@ -12,6 +12,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from libpebble2.communication.transports.websocket import WebsocketTransport
+from libpebble2.communication.transports.websocket.protocol import WebSocketInstallStatus
+
 from pebble_tool.commands import base
 from pebble_tool.commands.install import ToolAppInstaller
 from pebble_tool.commands.sdk.manage import SDKManager
@@ -93,6 +96,31 @@ def test_install_takes_a_pbw_with_a_build_for_the_watch(tmp_path) -> None:
 
 def test_install_leaves_a_plugin_only_pbw_to_the_phone(tmp_path) -> None:
     ToolAppInstaller._check_platform(EMERY_WATCH, make_pbw(tmp_path, []))
+
+
+def test_install_leaves_a_watch_libpebble2_does_not_know_to_the_phone(tmp_path) -> None:
+    watch = SimpleNamespace(watch_info=SimpleNamespace(running=SimpleNamespace(hardware_platform=0x7f)),
+                            watch_platform='unknown')
+    ToolAppInstaller._check_platform(watch, make_pbw(tmp_path, ['aplite', 'gabbro']))
+
+
+def test_forced_phone_install_skips_the_platform_check(tmp_path, monkeypatch) -> None:
+    sent = []
+
+    class Transport(WebsocketTransport):
+        def __init__(self):
+            pass
+
+        def send_packet(self, packet, target=None):
+            sent.append(packet)
+
+    pebble = SimpleNamespace(transport=Transport(),
+                             read_transport_message=lambda *a, **k: SimpleNamespace(
+                                 status=WebSocketInstallStatus.StatusCode.Success))
+    monkeypatch.setattr(ToolAppInstaller, '_check_platform',
+                        staticmethod(lambda *a: pytest.fail('checked the platform despite --force')))
+    ToolAppInstaller(pebble, make_pbw(tmp_path, ['aplite']), quiet=True).install(force_install=True)
+    assert len(sent) == 1
 
 
 def test_long_config_pages_open_from_a_file_and_are_cleaned_up(monkeypatch, tmp_path) -> None:
