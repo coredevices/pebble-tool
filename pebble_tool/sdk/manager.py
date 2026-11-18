@@ -65,14 +65,14 @@ def _venv_pip_install(venv_path, *args, cwd=None):
     venv_python = os.path.join(venv_path, "bin", "python")
     subprocess.check_call([uv, "pip", "install", "--python", venv_python, *args], cwd=cwd)
 
-def get_pebble_platforms(sdk_path=None):
-    """Get platforms from the installed SDK, with fallback to hardcoded list."""
+def _sdk_platform_module(sdk_path=None):
+    """The installed SDK's pebble_sdk_platform module, or None without one."""
     try:
         if sdk_path is None:
             from pebble_tool.sdk import sdk_manager
             sdk_path = sdk_manager.current_path
             if sdk_path is None:
-                return _FALLBACK_PLATFORMS
+                return None
 
         # Try standard SDK structure: <sdk-core>/pebble/common/tools/pebble_sdk_platform.py
         platform_file = os.path.join(sdk_path, 'pebble', 'common', 'tools', 'pebble_sdk_platform.py')
@@ -85,10 +85,39 @@ def get_pebble_platforms(sdk_path=None):
             spec = importlib.util.spec_from_file_location("pebble_sdk_platform", platform_file)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            return tuple(module.pebble_platforms.keys())
+            return module
     except Exception:
         pass
-    return _FALLBACK_PLATFORMS
+    return None
+
+
+def get_pebble_platforms(sdk_path=None):
+    """Get platforms from the installed SDK, with fallback to hardcoded list."""
+    module = _sdk_platform_module(sdk_path)
+    try:
+        return tuple(module.pebble_platforms.keys())
+    except Exception:
+        return _FALLBACK_PLATFORMS
+
+
+def resolve_target_platforms(target_platforms, sdk_path=None):
+    """The platforms a project's targetPlatforms stands for, by name. An entry names a platform or asks
+    for capabilities ("round", "color~rect"), which the SDK reads as each of its platforms that has them.
+    An SDK that only takes names gets the list as it is."""
+    module = _sdk_platform_module(sdk_path)
+    matches = getattr(module, 'platform_matches', None)
+    if matches is None:
+        return list(target_platforms)
+    # <root>/common/tools/pebble_sdk_platform.py, with a directory per platform beside common.
+    sdk_root = os.path.dirname(os.path.dirname(os.path.dirname(module.__file__)))
+    names = []
+    for entry in target_platforms:
+        matched = [p for p in module.pebble_platforms
+                   if os.path.isdir(os.path.join(sdk_root, p)) and matches(p, [entry])]
+        by_name = entry in module.pebble_platforms or not matched
+        names += [n for n in ([entry] if by_name else matched) if n not in names]
+    return names
+
 
 class SDKManager(object):
     DOWNLOAD_SERVER = "https://sdk.repebble.com"
