@@ -14,6 +14,7 @@ import pytest
 
 from libpebble2.communication.transports.websocket import WebsocketTransport
 from libpebble2.communication.transports.websocket.protocol import WebSocketInstallStatus
+from libpebble2.util.platform import KNOWN_PLATFORMS, Platform
 
 from pebble_tool.commands import base
 from pebble_tool.commands.install import ToolAppInstaller
@@ -70,24 +71,53 @@ def test_silent_serial_port_explains_bluetooth_classic() -> None:
     assert 'Bluetooth Classic' in message and '--phone' in message
 
 
-def make_pbw(tmp_path, platforms, name='app.pbw'):
+def make_pbw(tmp_path, platforms, name='app.pbw', platform=None):
+    """A pbw with a directory per platform. `platform` describes the one of its name in its manifest."""
     path = tmp_path / name
     with zipfile.ZipFile(path, 'w') as z:
         z.writestr('appinfo.json', json.dumps({'uuid': '6b1c3a52-0d4e-4f5a-9c33-2f0e7a1d8b40'}))
-        for platform in platforms:
-            z.writestr('{}/manifest.json'.format(platform), json.dumps({'manifestVersion': 2}))
+        for directory in platforms:
+            manifest = {'manifestVersion': 2}
+            if platform and platform['name'] == directory:
+                manifest['platform'] = platform
+            z.writestr('{}/manifest.json'.format(directory), json.dumps(manifest))
     return str(path)
 
 
 EMERY_WATCH = SimpleNamespace(watch_info=SimpleNamespace(running=SimpleNamespace(hardware_platform=EMERY_EMULATOR)),
-                              watch_platform='emery')
+                              watch_platform='emery', watch_platform_info=KNOWN_PLATFORMS['emery'])
+# A watch of a platform that only it has described.
+SLATE = Platform('slate', 240, 280, color=True, app_memory=0x20000)
+SLATE_WATCH = SimpleNamespace(watch_info=SimpleNamespace(running=SimpleNamespace(hardware_platform=0x7f)),
+                              watch_platform='slate', watch_platform_info=SLATE)
 
 
 def test_install_refuses_a_pbw_without_a_build_for_the_watch(tmp_path) -> None:
     with pytest.raises(ToolError) as e:
         ToolAppInstaller._check_platform(EMERY_WATCH, make_pbw(tmp_path, ['aplite', 'chalk']))
     assert str(e.value) == ('This pbw has no emery build (it has aplite, chalk). Add "emery" to targetPlatforms '
+                            'in package.json and rebuild, or install its aplite build with --force.')
+    with pytest.raises(ToolError) as e:
+        ToolAppInstaller._check_platform(EMERY_WATCH, make_pbw(tmp_path, ['chalk']))
+    assert str(e.value) == ('This pbw has no emery build (it has chalk). Add "emery" to targetPlatforms '
                             'in package.json and rebuild.')
+
+
+def test_install_names_the_build_it_would_force(tmp_path) -> None:
+    with pytest.raises(ToolError) as e:
+        ToolAppInstaller._check_platform(EMERY_WATCH, make_pbw(tmp_path, ['flint', 'chalk']))
+    assert str(e.value) == ('This pbw has no emery build (it has chalk, flint). Add "emery" to targetPlatforms '
+                            'in package.json and rebuild, or install its flint build with --force.')
+
+
+def test_install_on_a_platform_the_watch_described(tmp_path) -> None:
+    with pytest.raises(ToolError) as e:
+        ToolAppInstaller._check_platform(SLATE_WATCH, make_pbw(tmp_path, ['emery', 'basalt']))
+    assert str(e.value) == ('This pbw has no slate build (it has basalt, emery). Add "slate" to targetPlatforms '
+                            'in package.json and rebuild, or install its emery build with --force.')
+    slate = {'name': 'slate', 'abi': 'armv7m', 'limits': {'app_memory': 0x20000},
+             'display': {'width': 240, 'height': 280, 'shape': 'rect', 'color': True}}
+    ToolAppInstaller._check_platform(SLATE_WATCH, make_pbw(tmp_path, ['emery', 'slate'], platform=slate))
 
 
 def test_install_takes_a_pbw_with_a_build_for_the_watch(tmp_path) -> None:

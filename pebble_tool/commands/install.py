@@ -115,7 +115,8 @@ class InstallCommand(PebbleCommand):
         parser.add_argument('--throttle', nargs='?', const=0.004, type=float, 
                             help="Throttle transfer (in seconds) to prevent QEMU timeouts with large apps. Defaults to 0.002.")
         parser.add_argument('--force', action="store_true",
-                            help="Force install even if the pbw doesn't support the connected platform")
+                            help="Install even if the pbw has no build for the connected watch's platform: the best "
+                                 "of its builds that the watch can run is installed.")
         parser.add_argument('--logs', action="store_true", help="Enable logs")
         parser.add_argument('--qemu_logs', action="store_true", help="Enable QEMU serial logs (emulator only)")
         return parser
@@ -136,7 +137,10 @@ class ToolAppInstaller(object):
             self._install_via_serial(self.pebble, self.pbw, force_install=force_install)
 
     def _install_via_serial(self, pebble, pbw, force_install=False):
-        installer = AppInstaller(pebble, pbw)
+        if not force_install:
+            self._check_platform(pebble, pbw)
+        # Forced, the best binary the watch can run is installed, whatever platform it was built for.
+        installer = AppInstaller(pebble, pbw, any_fit=force_install)
         self.progress_bar.maxval = installer.total_size
         self.progress_bar.start()
         installer.register_handler("progress", self._handle_pp_progress)
@@ -148,21 +152,28 @@ class ToolAppInstaller(object):
 
     @staticmethod
     def _check_platform(pebble, pbw):
-        """Refuse a pbw with nothing that runs on this watch, which the phone would only fail to install
+        """Refuse a pbw with nothing built for this watch, which the phone would only fail to install
         without saying why. A watch libpebble2 doesn't recognise is left to the phone, which knows more boards."""
         platform = pebble.watch_platform
         if platform == 'unknown':
             return
-        bundle = PebbleBundle(pbw, hardware=pebble.watch_info.running.hardware_platform)
+        hardware = pebble.watch_info.running.hardware_platform
+        bundle = PebbleBundle(pbw, hardware=hardware, platform=pebble.watch_platform_info)
         names = bundle.zip.namelist()
         built = sorted(path[:-len('/' + PebbleBundle.MANIFEST_FILENAME)] for path in names
                        if path.endswith('/' + PebbleBundle.MANIFEST_FILENAME))
         if not built and PebbleBundle.MANIFEST_FILENAME not in names:
             return  # Nothing for the watch, e.g. a plugin-only pbw.
         if not bundle.should_permit_install():
+            # What the watch would run all the same.
+            fits = PebbleBundle(pbw, hardware=hardware, platform=pebble.watch_platform_info, any_fit=True)
+            manifest = fits.get_real_path(PebbleBundle.MANIFEST_FILENAME)
+            forced = (", or install its {} build with --force".format(manifest.rpartition('/')[0] or 'aplite')
+                      if manifest and fits.should_permit_install() else "")
             raise ToolError("This pbw has no {platform} build{has}. Add \"{platform}\" to targetPlatforms in "
-                            "package.json and rebuild.".format(
-                                platform=platform, has=" (it has {})".format(", ".join(built)) if built else ""))
+                            "package.json and rebuild{forced}.".format(
+                                platform=platform, has=" (it has {})".format(", ".join(built)) if built else "",
+                                forced=forced))
 
     def _install_via_websocket(self, pebble, pbw, force_install=False):
         if not force_install:
