@@ -119,6 +119,19 @@ def resolve_target_platforms(target_platforms, sdk_path=None):
     return names
 
 
+def sdk_include_path(sdk_path, platform):
+    """Where an SDK keeps the headers of a platform. A platform has them in its own directory, or, in an
+    SDK whose platforms of an ABI share them, in the directory of its ABI: the SDK knows which."""
+    own = os.path.join(sdk_path, 'pebble', platform, 'include')
+    if os.path.isdir(own):
+        return own
+    component = getattr(_sdk_platform_module(sdk_path), 'sdk_component', None)
+    try:
+        return component(os.path.join(sdk_path, 'pebble'), platform, 'include') or own
+    except Exception:
+        return own
+
+
 class SDKManager(object):
     DOWNLOAD_SERVER = "https://sdk.repebble.com"
     DOWNLOAD_SERVER_DEFAULT = "https://sdk.repebble.com"

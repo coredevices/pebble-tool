@@ -8,6 +8,7 @@ import subprocess
 
 from pebble_tool.commands.sdk.project import SDKProjectCommand
 from pebble_tool.exceptions import ToolError
+from pebble_tool.sdk import sdk_include_path
 
 
 class CompileCommandsCommand(SDKProjectCommand):
@@ -143,7 +144,7 @@ class CompileCommandsCommand(SDKProjectCommand):
     def _include_dirs(self, project_dir, platform, env):
         # The SDK's waf adds these per-compile in setup_pebble_c but never persists them
         # to the env cache, so we reproduce them here.
-        dirs = [os.path.join(self.get_sdk_path(), 'pebble', platform, 'include')]
+        dirs = [sdk_include_path(self.get_sdk_path(), platform)]
         # Project include dirs: '.', 'src', 'include' (per setup_pebble_c); modern
         # projects also keep their C under src/c.
         for rel in ('.', 'src', os.path.join('src', 'c'), 'include'):

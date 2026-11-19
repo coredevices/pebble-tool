@@ -10,7 +10,7 @@ import shutil
 
 from ..base import BaseCommand
 from pebble_tool.exceptions import MissingSDK
-from pebble_tool.sdk import get_sdk_persist_dir, sdk_manager, get_pebble_platforms
+from pebble_tool.sdk import get_sdk_persist_dir, sdk_manager, get_pebble_platforms, sdk_include_path
 from pebble_tool.util.versions import version_to_key
 
 
@@ -158,7 +158,7 @@ class SDKManager(BaseCommand):
     def do_include_path(cls, args):
         sdk = args.sdk or sdk_manager.get_current_sdk()
         path = sdk_manager.path_for_sdk(sdk)
-        path = os.path.join(path, "pebble", args.platform, "include")
+        path = sdk_include_path(path, args.platform)
         if not os.path.exists(path):
             raise MissingSDK("No platform '{}' available for SDK {}".format(args.platform, sdk))
         print(path)
