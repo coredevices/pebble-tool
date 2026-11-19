@@ -34,7 +34,7 @@ from .commands import (install, logs, screenshot, timeline, emucontrol, ping, ac
                        transcription_server, data_logging, publish, firmware, appmessage, plugins,
                        oauth_connector)
 from .commands.sdk import create, emulator
-from .commands.sdk.project import package, analyse_size, convert, debug, compile_commands
+from .commands.sdk.project import package, analyse_size, convert, debug, compile_commands, doctor
 
 def run_tool(args=None):
     urllib3.disable_warnings()  # sigh. :(
