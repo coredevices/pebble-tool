@@ -234,6 +234,9 @@ class QemuLogPrinter(object):
             raise ToolError("Could not find emulator info for platform: {}".format(platform))
         
         self.serial_port = info['qemu']['serial']
+        # pypkjs keeps the console to itself when the firmware takes its session there.
+        self.console_may_be_taken = info.get('pypkjs', {}).get('console', False)
+        self.received = False
         self.platform = platform
         logger.debug("QEMU serial port: %d", self.serial_port)
     
@@ -403,6 +406,7 @@ class QemuLogPrinter(object):
                     # Connection closed
                     logger.debug("QEMU serial connection closed")
                     break
+                self.received = True
                 
                 # Process byte by byte to extract frames
                 for byte in bytearray(data):
@@ -427,7 +431,10 @@ class QemuLogPrinter(object):
                             self.input_buffer.append(byte)
                 
             except socket.timeout:
-                # Timeout is OK, just continue
+                if self.console_may_be_taken and not self.received:
+                    self.console_may_be_taken = False
+                    print("Nothing from the emulator's serial port yet. If the firmware takes the phone's "
+                          "session on its console, pypkjs is using the port and QEMU logs are not available.")
                 continue
             except socket.error as e:
                 if self.running:
