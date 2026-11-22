@@ -18,9 +18,11 @@ import subprocess
 import sys
 import tempfile
 import time
+from importlib.metadata import PackageNotFoundError, version
 
 from libpebble2.communication.transports.websocket import WebsocketTransport
 from libpebble2.exceptions import ConnectionError
+from packaging.version import parse as parse_version
 
 from pebble_tool.account import get_default_account
 from pebble_tool.exceptions import MissingEmulatorError, ToolError
@@ -37,6 +39,12 @@ def pypkjs_env(account):
     if os.getenv('PEBBLE_APPSTORE_API_BASE'):
         env['PYPKJS_APPSTORE_API_BASE'] = os.environ['PEBBLE_APPSTORE_API_BASE']
     return env
+
+def pypkjs_takes_console():
+    try:
+        return parse_version(version('pypkjs')) >= parse_version('3.1.0')
+    except PackageNotFoundError:
+        return False
 
 logger = logging.getLogger("pebble_tool.sdk.emulator")
 black_hole = open(os.devnull, 'w')
@@ -301,6 +309,7 @@ class ManagedEmulatorTransport(WebsocketTransport):
             'pypkjs': {
                 'pid': self.pypkjs_pid,
                 'port': self.pypkjs_port,
+                'console': pypkjs_takes_console(),
             },
             'version': self.version,
         }
@@ -561,6 +570,8 @@ class ManagedEmulatorTransport(WebsocketTransport):
             "--persist", get_sdk_persist_dir(self.platform, self.version),
             '--debug',
         ]
+        if pypkjs_takes_console():
+            command.extend(["--console", "localhost:{}".format(self.qemu_serial_port)])
         if os.path.exists(layout_file):
             command.extend(["--layout", layout_file])
 
@@ -640,9 +651,10 @@ class ManagedEmulatorTransport(WebsocketTransport):
 class ExternalQemuTransport(WebsocketTransport):
     """Transport that connects to an external QEMU instance and spawns pypkjs."""
 
-    def __init__(self, qemu_host, qemu_port, platform, version=None):
+    def __init__(self, qemu_host, qemu_port, platform, version=None, console=None):
         self.qemu_host = qemu_host
         self.qemu_port = qemu_port
+        self.console = console
         self.platform = platform
         self.version = version
         self.pypkjs_pid = None
@@ -799,6 +811,10 @@ class ExternalQemuTransport(WebsocketTransport):
             "--persist", get_sdk_persist_dir(self.platform, self.version),
             '--debug',
         ]
+        if self.console:
+            if not pypkjs_takes_console():
+                raise ToolError("--qemu-console needs pypkjs 3.1.0 or later.")
+            command.extend(["--console", self.console])
         if os.path.exists(layout_file):
             command.extend(["--layout", layout_file])
 

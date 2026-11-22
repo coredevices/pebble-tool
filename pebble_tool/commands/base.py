@@ -320,7 +320,8 @@ class PebbleTransportQemu(PebbleTransportConfiguration):
                 raise ToolError("--pypkjs requires --platform <platform> to be specified")
             sdk_version = getattr(args, 'sdk', None)
             cls._using_pypkjs = True
-            return ExternalQemuTransport(ip, port, platform, sdk_version)
+            console = getattr(args, 'qemu_console', None) or os.environ.get('PEBBLE_QEMU_CONSOLE')
+            return ExternalQemuTransport(ip, port, platform, sdk_version, console=console)
 
         # Check if a pypkjs is already mediating for this QEMU port.
         # If so, connect through it via WebSocket instead of directly to QEMU
@@ -355,6 +356,10 @@ class PebbleTransportQemu(PebbleTransportConfiguration):
         qemu_group = parser.add_argument_group()
         qemu_group.add_argument('--pypkjs', action='store_true',
                             help="When using --qemu, also spawn pypkjs. Requires --platform.")
+        qemu_group.add_argument('--qemu-console', metavar='host:port',
+                            help="When using --qemu --pypkjs, where the console of the firmware is. "
+                                 "pypkjs talks to the firmware there if the firmware supports it. "
+                                 "Equivalent to PEBBLE_QEMU_CONSOLE.")
         qemu_group.add_argument('--platform', type=str, choices=get_pebble_platforms(),
                                 help="When using --qemu --pypkjs, specify the platform.")
 
