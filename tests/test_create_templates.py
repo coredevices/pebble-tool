@@ -38,3 +38,18 @@ def test_without_ai_option_no_agent_files(tmp_path, monkeypatch):
     project = _create(tmp_path, monkeypatch, ["app"])
     assert not (project / "AGENTS.md").exists()
     assert not (project / "CLAUDE.md").exists()
+
+
+def test_flexible_option_builds_for_classes_of_display(tmp_path, monkeypatch):
+    project = _create(tmp_path, monkeypatch, ["app", "cmake", "flexible"])
+    pebble = json.loads((project / "package.json").read_text())["pebble"]
+    assert pebble["flexible"] is True
+    assert pebble["targetPlatforms"] == ["rect", "round", "basalt", "chalk", "diorite"]
+    assert (project / "CMakeLists.txt").exists()
+
+
+def test_without_flexible_option_platforms_are_named(tmp_path, monkeypatch):
+    project = _create(tmp_path, monkeypatch, ["app", "cmake"])
+    pebble = json.loads((project / "package.json").read_text())["pebble"]
+    assert "flexible" not in pebble
+    assert "emery" in pebble["targetPlatforms"]

@@ -57,6 +57,9 @@
         },
         "cmake": {
             "CMakeLists.txt": "app/CMakeLists.txt"
+        },
+        "flexible": {
+            "package.json": "app/package-flexible.json"
         }
     },
     "plugin": {

@@ -17,6 +17,12 @@ modern Pebble hardware is **emery** (Pebble Time 2), **gabbro** (Pebble Round
 2), and **flint** (Pebble 2 Duo); the original Pebble platforms (aplite,
 basalt, chalk, diorite) are included by default for backwards compatibility.
 
+With `"flexible": true` beside it, `rect` and `round` build one binary for every
+display of that shape, in colour and in black and white, so the app also fills
+the display of watches newer than the SDK. Lay out from the window bounds rather
+than from a display size, and ask `platform_has_feature()` for what a watch has.
+Run `pebble doctor` to find what ties the source to one display.
+
 ## Project layout
 
 ```

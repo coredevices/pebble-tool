@@ -11,7 +11,7 @@ from uuid import uuid4
 from six import iteritems, string_types
 
 from . import SDKCommand
-from pebble_tool.sdk import SDK_VERSION, sdk_version, has_rocky_tools, has_moddable_tools, sdk_has_cmake
+from pebble_tool.sdk import SDK_VERSION, sdk_version, has_rocky_tools, has_moddable_tools, sdk_has_cmake, sdk_has_flexible
 from pebble_tool.exceptions import ToolError
 from pebble_tool.util.analytics import post_event
 from pebble_tool.util.versions import version_to_key
@@ -184,6 +184,10 @@ class NewProjectCommand(SDKCommand):
         if options[0] != 'rocky':
             # Projects build with CMake on the SDKs that have it, and with waf on older ones.
             options.append('cmake' if sdk_has_cmake() else 'waf')
+
+        if options[0] == 'app' and sdk_has_cmake() and sdk_has_flexible():
+            # One binary for every display of a shape and colour depth, on the SDKs that build them.
+            options.append('flexible')
 
         with open(extant_path(os.path.join(x, "templates.json") for x in template_paths)) as f:
             template_layout = json.load(f)
