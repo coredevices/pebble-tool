@@ -618,16 +618,16 @@ wheels = [
 
 [[package]]
 name = "libpebble2"
-version = "0.0.35"
+version = "0.0.36"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyserial" },
     { name = "six" },
     { name = "websocket-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c6/32/5024c315609fc9785c07262d3735d2a27f1269723d448da019f7bfd5edff/libpebble2-0.0.35.tar.gz", hash = "sha256:4159dd04463589d05d03ea337d344f479ab464334bb372f64e4e1dae141a03f8", size = 57242, upload-time = "2026-11-18T19:50:42.744Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fd/31/890ea7ce1ee905b2ee0934c520573ed94531462ec835ff3a9dae1ca202e8/libpebble2-0.0.36.tar.gz", hash = "sha256:7aa5c7c52fe1ab06a60d1db048a8941291da4ea47c2d43d900d7fccbe84f4c15", size = 59538, upload-time = "2026-11-23T19:01:06.439Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/96/f9/41d66912b509e01a6b4a1dfb2c49bdfa2c91dca177c605ee39f39e3ac387/libpebble2-0.0.35-py3-none-any.whl", hash = "sha256:ed9b3fdb6d5342d72f43d0852a63b499979c8e11ae22ff45bb8ba8602b10b263", size = 65703, upload-time = "2026-11-18T19:50:41.226Z" },
+    { url = "https://files.pythonhosted.org/packages/98/f0/f44b923c0e61d2015934ca00dda00949a3b59089208622c37da371aa879a/libpebble2-0.0.36-py3-none-any.whl", hash = "sha256:b793310d981d6119d1ecb99eedb6b7f5c9bc4ccbade9cf053dfc3e9a1b1b7482", size = 66664, upload-time = "2026-11-23T19:01:05.227Z" },
 ]
 
 [[package]]
@@ -870,7 +870,7 @@ requires-dist = [
     { name = "google-auth", specifier = ">=2.0.0" },
     { name = "google-auth-oauthlib", specifier = ">=1.2.0" },
     { name = "httplib2", specifier = ">=0.19.0" },
-    { name = "libpebble2", specifier = ">=0.0.35" },
+    { name = "libpebble2", specifier = ">=0.0.36" },
     { name = "oauth2client", specifier = ">=4.1.3" },
     { name = "packaging", specifier = ">=25.0" },
     { name = "pillow", specifier = ">=10.0.0" },
