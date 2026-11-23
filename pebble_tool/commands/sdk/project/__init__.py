@@ -83,7 +83,13 @@ class SDKProjectCommand(SDKCommand):
 
     @property
     def uses_cmake(self):
-        """Whether the project builds with CMake (it has a CMakeLists.txt) rather than waf."""
+        """Whether the project builds with CMake (it has a CMakeLists.txt) rather than waf.
+
+        PEBBLE_USE_WAF=1 builds with waf anyway, for a project whose CMakeLists.txt is only
+        there for an IDE.
+        """
+        if os.environ.get('PEBBLE_USE_WAF', '').lower() in ('1', 'true', 'yes', 'on'):
+            return False
         return os.path.exists(os.path.join(self.project.project_dir, 'CMakeLists.txt'))
 
     def _cmake(self, args):

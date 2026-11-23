@@ -88,6 +88,19 @@ def test_a_waf_project_still_builds_with_waf(project, monkeypatch):
     assert waf == ['configure', 'build']
 
 
+def test_pebble_use_waf_builds_with_waf_despite_a_cmakelists(project, monkeypatch):
+    # A CMakeLists.txt that is only there for an IDE.
+    (project / 'wscript').write_text('')
+    monkeypatch.setenv('PEBBLE_USE_WAF', '1')
+    waf = []
+    monkeypatch.setattr(BuildCommand, '_waf', lambda self, command, **k: waf.append(command))
+    monkeypatch.setattr(SDKProjectCommand, '_cmake', lambda *a, **k: pytest.fail("CMake ran"))
+    monkeypatch.setattr('pebble_tool.commands.sdk.project.build.post_event', lambda *a, **k: None)
+    command, args = _parse(BuildCommand, [])
+    command(args)
+    assert waf == ['configure', 'build']
+
+
 def test_convert_keeps_the_wscript_on_an_sdk_without_cmake(project, monkeypatch):
     (project / 'CMakeLists.txt').unlink()
     (project / 'wscript').write_text('')
