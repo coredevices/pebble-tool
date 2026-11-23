@@ -119,6 +119,28 @@ def resolve_target_platforms(target_platforms, sdk_path=None):
     return names
 
 
+def resolve_builds(target_platforms, flexible=False, sdk_path=None):
+    """What a project builds, by the name of each build's directory under build/ and in the pbw. A
+    flexible project builds a binary for each class of display ("rect-color"), and for the platforms
+    it names or that are of a class. Any other project builds for its platforms."""
+    module = _sdk_platform_module(sdk_path)
+    targets = getattr(module, 'flexible_targets', None)
+    if flexible and targets is not None:
+        sdk_root = os.path.dirname(os.path.dirname(os.path.dirname(module.__file__)))
+        installed = [p for p in module.pebble_platforms if os.path.isdir(os.path.join(sdk_root, p))]
+        try:
+            return list(targets(list(target_platforms or ()), installed))
+        except Exception:
+            # The build says what is wrong with the entries.
+            pass
+    return resolve_target_platforms(target_platforms or get_pebble_platforms(sdk_path), sdk_path)
+
+
+def sdk_has_flexible(sdk_path=None):
+    """Whether the SDK builds flexible binaries."""
+    return hasattr(_sdk_platform_module(sdk_path), 'flexible_targets')
+
+
 def sdk_include_path(sdk_path, platform):
     """Where an SDK keeps the headers of a platform. A platform has them in its own directory, or, in an
     SDK whose platforms of an ABI share them, in the directory of its ABI: the SDK knows which."""

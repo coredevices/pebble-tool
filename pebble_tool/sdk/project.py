@@ -10,7 +10,7 @@ SDK_VERSION = "3"
 from pebble_tool.exceptions import (InvalidProjectException, InvalidJSONException, OutdatedProjectException,
                                     PebbleProjectException)
 from pebble_tool.sdk import sdk_version
-from . import get_pebble_platforms, resolve_target_platforms
+from . import get_pebble_platforms, resolve_builds
 
 
 def PebbleProject(project_dir=None):
@@ -23,6 +23,16 @@ def PebbleProject(project_dir=None):
 
 
 class PebbleProjectBase(object):
+    def _resolve_platforms(self):
+        #: Whether the project builds binaries for classes of display rather than for platforms alone.
+        self.flexible = self.appinfo.get('flexible') is True
+        #: The directories of the project's binaries under build/, and in its pbw.
+        self.builds = resolve_builds(self.appinfo.get('targetPlatforms'), self.flexible)
+        #: The platforms the project builds a binary for by name.
+        platforms = get_pebble_platforms()
+        self.target_platforms = ([b for b in self.builds if b in platforms] if self.flexible
+                                 else list(self.builds))
+
     def __init__(self, project_dir=None):
         if project_dir is None:
             project_dir = os.getcwd()
@@ -105,8 +115,7 @@ class AppinfoProject(PebbleProjectBase):
         self.company_name = self.appinfo['companyName']
         self.version = self.appinfo['versionLabel']
         self.sdk_version = self.appinfo.get('sdkVersion', 2)
-        self.target_platforms = resolve_target_platforms(
-            self.appinfo.get('targetPlatforms', get_pebble_platforms()))
+        self._resolve_platforms()
         self.enable_multi_js = self.appinfo.get('enableMultiJS', False)
         self.capabilities = self.appinfo.get('capabilities', [])
         self.project_type = self.appinfo.get('projectType', 'native')
@@ -162,8 +171,7 @@ class NpmProject(PebbleProjectBase):
         self.company_name = self.project_info['author']
         self.version = self.project_info['version']
         self.sdk_version = self.appinfo.get('sdkVersion', 2)
-        self.target_platforms = resolve_target_platforms(
-            self.appinfo.get('targetPlatforms', get_pebble_platforms()))
+        self._resolve_platforms()
         self.enable_multi_js = self.appinfo.get('enableMultiJS', False)
         self.capabilities = self.appinfo.get('capabilities', [])
         self.project_type = self.appinfo.get('projectType', 'native')

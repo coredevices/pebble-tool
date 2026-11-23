@@ -24,7 +24,7 @@ class AnalyseSizeCommand(SDKProjectCommand):
         if args.elf_path is None:
             try:
                 project = PebbleProject()
-                paths = ['build/{}/pebble-app.elf'.format(x) for x in project.target_platforms]
+                paths = ['build/{}/pebble-app.elf'.format(x) for x in project.builds]
             except PebbleProjectException:
                 raise ToolError("This is not a valid Pebble project. Please instead specify a valid elf path.")
             except Exception as e:

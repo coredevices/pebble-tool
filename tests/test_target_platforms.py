@@ -45,3 +45,39 @@ def test_an_sdk_that_only_takes_names(tmp_path) -> None:
     sdk = make_sdk(tmp_path, 'pebble_platforms = {"emery": {}}\n')
     assert resolve_target_platforms(['emery', 'round'], sdk) == ['emery', 'round']
     assert resolve_target_platforms(['emery'], str(tmp_path / 'none')) == ['emery']
+
+
+# An SDK that builds flexible binaries.
+FLEXIBLE_SDK = SDK_PLATFORMS + '''
+
+def flexible_targets(selectors, installed):
+    if "bogus" in selectors:
+        raise ValueError("bogus")
+    builds = []
+    for shape, color, platform in (("rect", "color", "emery"), ("rect", "bw", "flint"),
+                                   ("round", "color", "gabbro")):
+        if not selectors or shape in selectors:
+            builds += [shape + "-" + color, platform]
+    return builds + [s for s in selectors if s in installed and s not in builds]
+'''
+
+
+def test_builds_of_a_flexible_project(tmp_path) -> None:
+    from pebble_tool.sdk.manager import resolve_builds, sdk_has_flexible
+    sdk = make_sdk(tmp_path, FLEXIBLE_SDK, platforms=('chalk', 'emery', 'flint', 'gabbro'))
+    assert sdk_has_flexible(sdk)
+    assert resolve_builds(['rect', 'chalk'], True, sdk) == ['rect-color', 'emery', 'rect-bw', 'flint', 'chalk']
+    # Without entries it is every class.
+    assert resolve_builds(None, True, sdk) == ['rect-color', 'emery', 'rect-bw', 'flint', 'round-color',
+                                               'gabbro']
+    # Entries the SDK refuses are left to the build to report.
+    assert resolve_builds(['emery', 'bogus'], True, sdk) == ['emery', 'bogus']
+    # Not flexible: the platforms, as before.
+    assert resolve_builds(['rect~mic'], False, sdk) == ['emery', 'flint']
+
+
+def test_flexible_needs_an_sdk_that_builds_it(tmp_path) -> None:
+    from pebble_tool.sdk.manager import resolve_builds, sdk_has_flexible
+    sdk = make_sdk(tmp_path, SDK_PLATFORMS)
+    assert not sdk_has_flexible(sdk)
+    assert resolve_builds(['round'], True, sdk) == ['gabbro']
