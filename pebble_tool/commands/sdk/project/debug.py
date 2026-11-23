@@ -17,6 +17,7 @@ from pebble_tool.sdk import sdk_manager, add_tools_to_path
 from pebble_tool.sdk.emulator import ManagedEmulatorTransport
 from pebble_tool.sdk.project import PebbleProject
 from pebble_tool.exceptions import ToolError
+from pebble_tool.util import watch_build_directory
 
 
 class GdbCommand(PebbleCommand):
@@ -116,7 +117,9 @@ class GdbCommand(PebbleCommand):
         if not os.path.exists(self._fw_elf):
             raise ToolError("SDK {} does not support app debugging. You need at least SDK 3.10.".format(sdk_version))
 
-        app_elf_path = os.path.join(os.getcwd(), 'build', platform, 'pebble-app.elf')
+        # A flexible binary is not in the directory of the emulator's platform.
+        build = watch_build_directory(self.pebble, platform)
+        app_elf_path = os.path.join(os.getcwd(), 'build', build, 'pebble-app.elf')
         if not os.path.exists(app_elf_path):
             raise ToolError("No app debugging information available. "
                             "You must be in a project directory and have built the app.")
@@ -147,7 +150,7 @@ class GdbCommand(PebbleCommand):
         ]
 
         # Optionally add the worker symbols, if any exist.
-        worker_elf_path = os.path.join(os.getcwd(), 'build', platform, 'pebble-worker.elf')
+        worker_elf_path = os.path.join(os.getcwd(), 'build', build, 'pebble-worker.elf')
         if os.path.exists(worker_elf_path):
             gdb_commands.append(self._get_symbol_command(worker_elf_path,
                                                          worker_load_address))

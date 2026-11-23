@@ -23,6 +23,7 @@ from pebble_tool.exceptions import PebbleProjectException, ToolError
 from pebble_tool.sdk import add_tools_to_path
 from pebble_tool.sdk.emulator import get_emulator_info
 from pebble_tool.sdk.project import PebbleProject
+from pebble_tool.util import watch_build_directory
 from colorama import Fore, Back, Style
 from sourcemap.exceptions import SourceMapDecodeError
 
@@ -174,7 +175,7 @@ class PebbleLogPrinter(object):
         if platform == 'unknown':
             app_elf_path = "build/pebble-{}.elf".format(process)
         else:
-            app_elf_path = "build/{}/pebble-{}.elf".format(platform, process)
+            app_elf_path = "build/{}/pebble-{}.elf".format(watch_build_directory(self.pebble), process)
 
         if not os.path.exists(app_elf_path):
             self._print(packet, "Could not look up debugging symbols.")

@@ -14,6 +14,37 @@ def is_debug_build():
     return os.path.exists(DEBUG_BUILD_MARKER)
 
 
+def project_pbw():
+    """The pbw the project in cwd last built."""
+    name = os.path.basename(os.getcwd())
+    debug_pbw = os.path.join('build', '{}_debug.pbw'.format(name))
+    if is_debug_build() and os.path.exists(debug_pbw):
+        return debug_pbw
+    return os.path.join('build', '{}.pbw'.format(name))
+
+
+def watch_build_directory(pebble, platform=None):
+    """The directory under build/ of the binary the watch runs out of the project in cwd. It is that of
+    the watch's platform, unless the pbw has a binary that suits the watch better: a flexible one, or,
+    for a watch the project does not build for, the one that fits it best."""
+    from libpebble2.util.bundle import PebbleBundle
+    platform = platform or pebble.watch_platform
+    try:
+        hardware = pebble.watch_info.running.hardware_platform
+        for any_fit in (False, True):
+            bundle = PebbleBundle(project_pbw(), hardware=hardware, platform=pebble.watch_platform_info,
+                                  any_fit=any_fit)
+            try:
+                directory = bundle.get_binary_directory()
+            finally:
+                bundle.close()
+            if directory:
+                return directory
+    except Exception:
+        pass
+    return platform
+
+
 def get_persist_dir():
     if platform.system() == 'Darwin':
         dir = os.path.expanduser("~/Library/Application Support/Pebble SDK")
