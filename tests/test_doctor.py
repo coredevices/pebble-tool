@@ -117,7 +117,7 @@ static const char *s_titles[] = {
 };
 
 static void prv_run(int kind) {
-  static int s_count = PBL_IF_SMARTSTRAP_ELSE(1, 0);
+  static int s_count = PBL_IF_MICROPHONE_ELSE(1, 0);
   int rows = PBL_IF_MICROPHONE_ELSE(3, 2);
   switch (kind) {
     case PBL_IF_HEALTH_ELSE(1, 2):
@@ -141,6 +141,16 @@ static void prv_run(int kind) {
     assert 'static variable' in reasons[2]
     assert 'case label' in reasons[3]
     assert 'preprocessor condition' in reasons[4]
+
+
+def test_smartstrap_macro_is_decided_at_build_time() -> None:
+    source = '''
+static void prv_run(void) {
+  int straps = PBL_IF_SMARTSTRAP_ELSE(1, 0);
+}
+'''
+    assert rules(source) == [(3, 'warning', 'feature-at-build-time')]
+    assert 'PlatformFeatureSmartstrap' in doctor.check_source(source)[0].message
 
 
 def test_shape_and_colour_macros_stay_constants() -> None:

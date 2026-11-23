@@ -32,8 +32,10 @@ DISPLAYS = {
 # Features a flexible binary asks for when it runs. Shape and colour depth are part of its class, so
 # PBL_IF_ROUND_ELSE, PBL_IF_COLOR_ELSE and COLOR_FALLBACK stay constants.
 FEATURE_DEFINES = ('PBL_MICROPHONE', 'PBL_HEALTH', 'PBL_SMARTSTRAP', 'PBL_SMARTSTRAP_POWER', 'PBL_COMPASS',
-                   'PBL_TOUCH', 'PBL_RGB_BACKLIGHT', 'PBL_SPEAKER')
-FEATURE_MACROS = ('PBL_IF_MICROPHONE_ELSE', 'PBL_IF_HEALTH_ELSE', 'PBL_IF_SMARTSTRAP_ELSE')
+                   'PBL_TOUCH', 'PBL_RGB_BACKLIGHT', 'PBL_SPEAKER', 'PBL_BAROMETER')
+FEATURE_MACROS = ('PBL_IF_MICROPHONE_ELSE', 'PBL_IF_HEALTH_ELSE')
+# Decided when the app is built, in a flexible build too.
+BUILD_TIME_MACROS = {'PBL_IF_SMARTSTRAP_ELSE': 'PlatformFeatureSmartstrap'}
 
 IGNORE = 'pebble-doctor: ignore'
 
@@ -44,6 +46,7 @@ _NUMBER_RE = re.compile(r'(?<![\w.])(\d+)[uUlL]*(?![\w.])')
 _GEOMETRY_RE = re.compile(r'\b(GRect|GSize|GPoint)\s*\(')
 _SIZE_MACRO_RE = re.compile(r'\bPBL_DISPLAY_(WIDTH|HEIGHT)\b')
 _FEATURE_MACRO_RE = re.compile(r'\b(%s)\b' % '|'.join(FEATURE_MACROS))
+_BUILD_TIME_MACRO_RE = re.compile(r'\b(%s)\b' % '|'.join(BUILD_TIME_MACROS))
 _FEATURE_DEFINE_RE = re.compile(r'\b(%s)\b' % '|'.join(FEATURE_DEFINES))
 _PLATFORM_DEFINE_RE = re.compile(r'\bPBL_PLATFORM_(?!TYPE_CURRENT\b|SWITCH)[A-Z0-9_]+\b')
 _MODEL_RE = re.compile(r'\bwatch_info_get_model\s*\(')
@@ -212,6 +215,12 @@ def check_source(text, path='', displays=None):
             add(m.start(), WARNING, 'feature-constant',
                 '{} is used {}, where only a constant works: in a flexible build it is asked when the '
                 'app runs, so set the value in code that runs'.format(m.group(1), why))
+
+    for m in _BUILD_TIME_MACRO_RE.finditer(code):
+        add(m.start(), WARNING, 'feature-at-build-time',
+            '{} is decided when the app is built: a flexible binary also runs on watches that differ in '
+            'it, so ask platform_has_feature({}) when the app runs, or require the feature in '
+            'targetPlatforms'.format(m.group(1), BUILD_TIME_MACROS[m.group(1)]))
 
     for m in _MODEL_RE.finditer(code):
         add(m.start(), NOTE, 'watch-model',
