@@ -345,3 +345,43 @@ def test_collect_screenshot_assets_with_prebuilt_pbw_skips_emulator(monkeypatch)
     monkeypatch.setattr(PublishCommand, "_capture_with_emulator", fake_capture)
     args = Namespace(non_interactive=True, screenshots=None, pbw="app.pbw")
     assert PublishCommand()._collect_screenshot_assets(args, {}, allow_skip=True) == ([], [])
+
+
+def test_upload_release_stages_large_pbw_via_presigned_url(monkeypatch, tmp_path):
+    pbw = tmp_path / "big.pbw"
+    pbw.write_bytes(b"x" * (PublishCommand.PRESIGNED_PBW_THRESHOLD + 1))
+    calls = {}
+
+    def fake_presign(url, headers, json, timeout):
+        calls["presign"] = (url, json)
+        return _FakeResponse({"key": "uploads/pbw/dev/k.pbw", "url": "https://r2.example/put"}, status_code=200)
+
+    def fake_put(url, data, headers, timeout):
+        calls["put"] = (url, headers["Content-Length"])
+        return _FakeResponse({}, status_code=200)
+
+    def fake_post(cls, url, headers, data, files, timeout, label):
+        calls["form"] = dict(data)
+        calls["fields"] = [name for name, _ in files]
+        return _FakeResponse({"message": "ok"}, status_code=200)
+
+    monkeypatch.setattr("pebble_tool.commands.publish.requests.post", fake_presign)
+    monkeypatch.setattr("pebble_tool.commands.publish.requests.put", fake_put)
+    monkeypatch.setattr(PublishCommand, "_post_with_wait_bar", classmethod(fake_post))
+
+    PublishCommand._upload_release(
+        api_base="http://localhost:3000",
+        app_id="app_1",
+        firebase_id_token="tok",
+        pbw_path=str(pbw),
+        version="1.0",
+        release_notes="",
+        is_published=False,
+        gif_paths=[],
+        screenshot_paths=[],
+    )
+    assert calls["presign"] == ("http://localhost:3000/api/dashboard/pbw-upload", {"size": pbw.stat().st_size, "appId": "app_1"})
+    assert calls["put"] == ("https://r2.example/put", str(pbw.stat().st_size))
+    assert calls["form"]["pbwKey"] == "uploads/pbw/dev/k.pbw"
+    assert calls["form"]["pbwName"] == "big.pbw"
+    assert "pbwFile" not in calls["fields"]
